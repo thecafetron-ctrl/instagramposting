@@ -3,9 +3,29 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database on startup."""
+    print("Starting app...")
+    
+    # Import models FIRST so tables are registered
+    from app import models  # noqa
+    
+    # Then initialize database
+    from app.database import init_db
+    try:
+        await init_db()
+        print("✓ Database initialized")
+    except Exception as e:
+        print(f"✗ Database error: {e}")
+    
+    yield
+    print("Shutting down...")
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
