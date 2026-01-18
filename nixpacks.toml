@@ -1,11 +1,11 @@
 [phases.setup]
-nixPkgs = ["python311", "nodejs_18"]
+nixPkgs = ["python311Full", "nodejs_18"]
 aptPkgs = ["libcairo2-dev", "libpango1.0-dev", "libgdk-pixbuf2.0-dev", "libffi-dev", "shared-mime-info"]
 
 [phases.install]
 cmds = [
     "cd frontend && npm install && npm run build",
-    "python -m pip install --upgrade pip",
+    "python -m ensurepip --upgrade",
     "python -m pip install -r backend/requirements.txt"
 ]
 
