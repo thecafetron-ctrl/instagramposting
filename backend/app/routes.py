@@ -812,7 +812,7 @@ async def post_to_instagram(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     
-    # Collect all image paths
+    # Collect all image paths (slides 1-4)
     image_paths = [
         post.slide_1_image,
         post.slide_2_image,
@@ -820,12 +820,14 @@ async def post_to_instagram(
         post.slide_4_image
     ]
     
-    # Add any additional slides from metadata
-    if post.metadata_json:
-        for i in range(5, 11):
+    # Add any additional slides from metadata (slides 5+)
+    if post.metadata_json and "extra_images" in post.metadata_json:
+        extra_images = post.metadata_json["extra_images"]
+        slide_count = post.metadata_json.get("slide_count", 4)
+        for i in range(5, slide_count + 1):
             img_key = f"slide_{i}_image"
-            if img_key in post.metadata_json:
-                image_paths.append(post.metadata_json[img_key])
+            if img_key in extra_images and extra_images[img_key]:
+                image_paths.append(extra_images[img_key])
     
     # Filter out None values
     image_paths = [p for p in image_paths if p]
