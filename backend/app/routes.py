@@ -837,8 +837,9 @@ async def post_to_instagram(
         )
     
     # Determine base URL for serving images
-    # In production, this should be your public domain
-    base_url = request.base_url or "https://your-domain.com"
+    # Use provided URL or try to get from environment
+    import os
+    base_url = request.base_url or os.environ.get("PUBLIC_URL", "https://instagramposting-production-4e91.up.railway.app")
     
     # Post to Instagram
     ig_result = await post_carousel_to_instagram(

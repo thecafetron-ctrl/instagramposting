@@ -44,7 +44,7 @@ async def upload_image_to_hosting(image_path: str, base_url: str) -> str:
     # Extract filename from path
     filename = os.path.basename(image_path)
     # Return the URL that serves the image through our API
-    return f"{base_url}/api/images/{filename}"
+    return f"{base_url}/images/{filename}"
 
 
 async def create_media_container(
