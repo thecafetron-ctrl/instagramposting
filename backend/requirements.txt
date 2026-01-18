@@ -11,3 +11,4 @@ pydantic-settings>=2.1.0
 openai>=1.10.0
 greenlet>=3.0.0
 cairosvg>=2.7.0
+apscheduler>=3.10.0

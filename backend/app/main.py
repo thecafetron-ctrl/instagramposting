@@ -8,7 +8,7 @@ from pathlib import Path
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database on startup."""
+    """Initialize database and scheduler on startup."""
     print("Starting app...")
     
     # Import models FIRST so tables are registered
@@ -22,8 +22,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"✗ Database error: {e}")
     
+    # Start the auto-posting scheduler
+    try:
+        from app.services.scheduler import start_scheduler
+        start_scheduler()
+        print("✓ Auto-post scheduler started")
+    except Exception as e:
+        print(f"✗ Scheduler error: {e}")
+    
     yield
+    
+    # Stop scheduler on shutdown
     print("Shutting down...")
+    try:
+        from app.services.scheduler import stop_scheduler
+        stop_scheduler()
+    except:
+        pass
 
 app = FastAPI(lifespan=lifespan)
 
