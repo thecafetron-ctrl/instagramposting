@@ -47,6 +47,8 @@ async def upload_image_to_hosting(image_path: str, base_url: str) -> str:
     return f"{base_url}/images/{filename}"
 
 
+_last_ig_error = None
+
 async def create_media_container(
     user_id: str,
     image_url: str,
@@ -57,7 +59,10 @@ async def create_media_container(
     Create a media container for an image.
     Returns the container ID if successful.
     """
-    async with httpx.AsyncClient() as client:
+    global _last_ig_error
+    print(f"Creating media container for: {image_url}")
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
         params = {
             "image_url": image_url,
             "access_token": access_token,
@@ -71,12 +76,19 @@ async def create_media_container(
             params=params
         )
         
+        print(f"Instagram API response: {response.status_code} - {response.text[:500]}")
+        
         if response.status_code == 200:
             data = response.json()
             return data.get("id")
         else:
+            _last_ig_error = response.text
             print(f"Error creating media container: {response.text}")
             return None
+
+
+def get_last_ig_error():
+    return _last_ig_error
 
 
 async def create_carousel_container(
@@ -247,7 +259,7 @@ async def post_carousel_to_instagram(
         else:
             return {
                 "status": "error",
-                "message": f"Failed to create media container for {image_path}"
+                "message": f"Failed to create media container for {image_path}. URL: {image_url}. Instagram error: {_last_ig_error}"
             }
     
     # Wait for all containers to be ready
