@@ -1,6 +1,6 @@
-"""Minimal FastAPI app"""
+"""FastAPI app with API routes and frontend"""
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
@@ -15,33 +15,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health check
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-@app.get("/test")
-def test():
-    static = Path("static")
-    files = list(static.rglob("*"))[:20] if static.exists() else []
-    return {
-        "static_exists": static.exists(),
-        "files": [str(f) for f in files],
-        "index_exists": (static / "index.html").exists()
-    }
+# Import and include API routes
+try:
+    from app.routes import router
+    app.include_router(router, prefix="/api")
+    print("✓ API routes loaded")
+except Exception as e:
+    print(f"✗ Failed to load routes: {e}")
+    import traceback
+    traceback.print_exc()
 
-# Mount static files - this handles all the JS/CSS with proper MIME types
-app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")
+# Create directories
+Path("generated_images").mkdir(exist_ok=True)
+Path("static").mkdir(exist_ok=True)
 
+# Mount static files
+app.mount("/images", StaticFiles(directory="generated_images"), name="images")
+
+# Mount frontend assets
+if Path("static/assets").exists():
+    app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")
+
+# Serve frontend
 @app.get("/")
 def root():
     index = Path("static/index.html")
     if index.exists():
         return HTMLResponse(index.read_text())
-    return {"error": "no index.html"}
+    return {"error": "Frontend not found"}
 
 @app.get("/{path:path}")
 def catch_all(path: str):
-    # SPA fallback - return index.html for all other routes
+    # Don't catch API or assets
+    if path.startswith("api") or path.startswith("assets") or path.startswith("images"):
+        return JSONResponse({"error": "not found"}, 404)
+    
+    # SPA fallback
     index = Path("static/index.html")
     if index.exists():
         return HTMLResponse(index.read_text())
