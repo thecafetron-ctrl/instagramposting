@@ -1,9 +1,9 @@
-"""Minimal FastAPI app for testing"""
+"""Minimal FastAPI app"""
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
-import mimetypes
 
 app = FastAPI()
 
@@ -29,26 +29,20 @@ def test():
         "index_exists": (static / "index.html").exists()
     }
 
+# Mount static files - this handles all the JS/CSS with proper MIME types
+app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")
+
 @app.get("/")
 def root():
     index = Path("static/index.html")
     if index.exists():
         return HTMLResponse(index.read_text())
-    return {"error": "no index.html", "cwd": str(Path.cwd())}
+    return {"error": "no index.html"}
 
 @app.get("/{path:path}")
 def catch_all(path: str):
-    if path in ("health", "test"):
-        return JSONResponse({"error": "not found"}, 404)
-    
-    f = Path("static") / path
-    if f.exists() and f.is_file():
-        mime, _ = mimetypes.guess_type(str(f))
-        return FileResponse(f, media_type=mime)
-    
-    # SPA fallback
+    # SPA fallback - return index.html for all other routes
     index = Path("static/index.html")
     if index.exists():
         return HTMLResponse(index.read_text())
-    
-    return JSONResponse({"error": "not found", "path": path}, 404)
+    return JSONResponse({"error": "not found"}, 404)
