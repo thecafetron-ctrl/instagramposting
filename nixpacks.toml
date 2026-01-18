@@ -5,8 +5,8 @@ aptPkgs = ["libcairo2-dev", "libpango1.0-dev", "libgdk-pixbuf2.0-dev", "libffi-d
 [phases.install]
 cmds = [
     "cd frontend && npm install && npm run build",
-    "pip install --upgrade pip",
-    "pip install -r backend/requirements.txt"
+    "python -m pip install --upgrade pip",
+    "python -m pip install -r backend/requirements.txt"
 ]
 
 [phases.build]
