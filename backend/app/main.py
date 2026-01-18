@@ -2,9 +2,10 @@
 Main FastAPI application for Instagram Carousel Generator.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
     Path("generated_images").mkdir(exist_ok=True)
     Path("assets").mkdir(exist_ok=True)
     Path("assets/fonts/Montserrat").mkdir(parents=True, exist_ok=True)
+    Path("static").mkdir(exist_ok=True)
     
     yield
     
@@ -56,16 +58,35 @@ if Path("generated_images").exists():
 # Include API routes
 app.include_router(router, prefix="/api")
 
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "name": "Instagram Carousel Generator",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/api/health"
-    }
+# Serve frontend static files (for production)
+static_path = Path("static")
+if static_path.exists() and (static_path / "index.html").exists():
+    # Mount assets folder
+    if (static_path / "assets").exists():
+        app.mount("/assets", StaticFiles(directory="static/assets"), name="frontend_assets")
+    
+    @app.get("/", response_class=HTMLResponse)
+    async def serve_frontend():
+        """Serve frontend index.html"""
+        return FileResponse("static/index.html")
+    
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve SPA - return index.html for all non-API routes"""
+        file_path = static_path / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse("static/index.html")
+else:
+    @app.get("/")
+    async def root():
+        """Root endpoint (API only mode)."""
+        return {
+            "name": "Instagram Carousel Generator",
+            "version": "1.0.0",
+            "docs": "/docs",
+            "health": "/api/health"
+        }
 
 
 if __name__ == "__main__":
