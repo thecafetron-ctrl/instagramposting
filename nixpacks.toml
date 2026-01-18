@@ -1,10 +1,12 @@
 [phases.setup]
-nixPkgs = ["python313", "nodejs_20", "cairo", "pango", "gdk-pixbuf", "pkg-config", "libffi", "zlib", "gcc"]
+nixPkgs = ["python311", "nodejs_18"]
+aptPkgs = ["libcairo2-dev", "libpango1.0-dev", "libgdk-pixbuf2.0-dev", "libffi-dev", "shared-mime-info"]
 
 [phases.install]
 cmds = [
-    "cd frontend && npm ci && npm run build",
-    "cd backend && pip install --upgrade pip && pip install -r requirements.txt"
+    "cd frontend && npm install && npm run build",
+    "pip install --upgrade pip",
+    "pip install -r backend/requirements.txt"
 ]
 
 [phases.build]
