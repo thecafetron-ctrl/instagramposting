@@ -29,16 +29,18 @@ BLACK = (0, 0, 0)
 
 # Typography - MASSIVE headlines, SAME SIZE for all body text
 HEADLINE_SIZE = 96  # MASSIVE headlines for slide 1
-HEADER_SIZE = 38  # Section headers - same as body but bold
-BODY_SIZE = 36  # Regular body text
-CTA_SIZE = 36  # Same size as body text
+HEADER_SIZE = 42  # Section headers - slightly bigger, bold
+BODY_SIZE = 34  # Regular body text
+CTA_SIZE = 48  # BIGGER for last slide
+CTA_BIG_SIZE = 56  # Even bigger for CTA emphasis
 LINE_HEIGHT_HEADLINE = 110
-LINE_HEIGHT_HEADER = 54
-LINE_HEIGHT_BODY = 52
-LINE_HEIGHT_CTA = 54
-PARAGRAPH_SPACING = 40  # Space between paragraphs/sections
-BULLET_LINE_HEIGHT = 48  # Tighter line height for bullets
+LINE_HEIGHT_HEADER = 58
+LINE_HEIGHT_BODY = 50
+LINE_HEIGHT_CTA = 65
+PARAGRAPH_SPACING = 45  # Space between paragraphs/sections
+BULLET_LINE_HEIGHT = 46  # Tighter line height for bullets
 MAX_TEXT_WIDTH = 900
+STANDOUT_HEADER_SIZE = 44  # Bold standout line at top of middle slides
 
 
 class TextRenderer:
@@ -122,29 +124,30 @@ class BackgroundGenerator:
     
     @staticmethod
     def add_stars(img: Image.Image, count: int, seed: int = 42):
-        """Add subtle star particles - professional and understated."""
+        """Add visible star particles with varying sizes and brightness."""
         width, height = img.size
+        draw = ImageDraw.Draw(img)
         random.seed(seed)
         
-        # Fewer, more subtle stars
-        actual_count = count // 3  # Reduce density
-        
-        for _ in range(actual_count):
+        # More visible stars
+        for _ in range(count):
             x = random.randint(0, width - 1)
             y = random.randint(0, height - 1)
-            brightness = random.randint(30, 80)  # More subtle
+            brightness = random.randint(80, 200)  # More visible
+            size = random.choice([1, 1, 1, 2, 2, 3])  # Varying sizes
             
-            px = img.getpixel((x, y))
-            new_val = min(255, px[0] + brightness)
-            img.putpixel((x, y), (new_val, new_val, new_val, 255))
+            color = (brightness, brightness, brightness, 255)
+            if size == 1:
+                img.putpixel((x, y), color)
+            else:
+                draw.ellipse([(x-size, y-size), (x+size, y+size)], fill=color)
             
-            # Occasional slightly larger star
-            if random.random() > 0.92:
-                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    if 0 <= x + dx < width and 0 <= y + dy < height:
-                        px = img.getpixel((x + dx, y + dy))
-                        new_val = min(255, px[0] + brightness // 3)
-                        img.putpixel((x + dx, y + dy), (new_val, new_val, new_val, 255))
+            # Some stars have a glow
+            if random.random() > 0.85:
+                glow_size = size + 4
+                for r in range(glow_size, 0, -1):
+                    alpha = int(30 * (glow_size - r) / glow_size)
+                    draw.ellipse([(x-r, y-r), (x+r, y+r)], fill=(brightness, brightness, brightness, alpha))
     
     @staticmethod
     def add_orbs(img: Image.Image, color_theme: dict, seed: int = 42):
@@ -176,23 +179,21 @@ class BackgroundGenerator:
     
     @staticmethod
     def add_mesh(img: Image.Image, color_theme: dict, seed: int = 42):
-        """Add professional hexagonal mesh pattern."""
+        """Add visible hexagonal mesh pattern."""
         draw = ImageDraw.Draw(img)
         accent = color_theme["accent"]
         width, height = img.size
         
         random.seed(seed)
         
-        # Hexagonal grid
-        hex_size = 60
+        # Hexagonal grid - MORE VISIBLE
+        hex_size = 55
         for row in range(-2, height // hex_size + 3):
             for col in range(-2, width // hex_size + 3):
-                # Offset every other row
                 offset = (hex_size // 2) if row % 2 else 0
                 cx = col * hex_size + offset
                 cy = row * int(hex_size * 0.866)
                 
-                # Draw hexagon
                 points = []
                 for i in range(6):
                     angle = math.pi / 6 + i * math.pi / 3
@@ -200,144 +201,155 @@ class BackgroundGenerator:
                     py = cy + hex_size // 2 * math.sin(angle)
                     points.append((px, py))
                 
-                # Only draw some hexagons for sparse effect
-                if random.random() > 0.7:
+                # Draw more hexagons with varying visibility
+                if random.random() > 0.5:
+                    alpha = random.randint(25, 45)  # MORE VISIBLE
                     for i in range(6):
-                        draw.line([points[i], points[(i+1) % 6]], fill=(*accent, 12), width=1)
+                        draw.line([points[i], points[(i+1) % 6]], fill=(*accent, alpha), width=1)
         
-        # Add subtle connection nodes
-        for _ in range(15):
-            x = random.randint(100, width - 100)
-            y = random.randint(100, height - 100)
-            # Small glowing dot
-            for r in range(8, 2, -1):
-                alpha = int(6 * (8 - r) / 6)
+        # Add glowing connection nodes - MORE OF THEM
+        for _ in range(25):
+            x = random.randint(80, width - 80)
+            y = random.randint(80, height - 80)
+            # Glowing dot
+            for r in range(12, 3, -1):
+                alpha = int(15 * (12 - r) / 9)
                 draw.ellipse([(x-r, y-r), (x+r, y+r)], fill=(*accent, alpha))
-            draw.ellipse([(x-2, y-2), (x+2, y+2)], fill=(*accent, 25))
+            draw.ellipse([(x-3, y-3), (x+3, y+3)], fill=(*accent, 50))
     
     @staticmethod
     def add_logistics(img: Image.Image, color_theme: dict, seed: int = 42):
-        """Add professional logistics network overlay - world map style with route connections."""
+        """Add visible logistics network overlay - world map style with route connections."""
         draw = ImageDraw.Draw(img)
         accent = color_theme["accent"]
         width, height = img.size
         
         random.seed(seed)
         
-        # Create a subtle world map / globe outline effect
+        # Create a world map / globe outline effect - MORE VISIBLE
         cx, cy = width // 2, height // 2
         
-        # Draw longitude lines (curved vertical lines)
-        for i in range(-4, 5):
-            curve_offset = i * 80
+        # Draw longitude lines (curved vertical lines) - MORE VISIBLE
+        for i in range(-5, 6):
+            curve_offset = i * 70
             points = []
-            for y in range(0, height, 20):
-                # Create slight curve
-                curve = int(30 * math.sin(y / height * math.pi))
+            for y in range(0, height, 15):
+                curve = int(40 * math.sin(y / height * math.pi))
                 x = cx + curve_offset + curve
                 points.append((x, y))
             if len(points) >= 2:
                 for j in range(len(points) - 1):
-                    draw.line([points[j], points[j+1]], fill=(*accent, 8), width=1)
+                    draw.line([points[j], points[j+1]], fill=(*accent, 25), width=1)
         
-        # Draw latitude lines (horizontal arcs)
-        for i in range(-3, 4):
-            y_pos = cy + i * 120
+        # Draw latitude lines (horizontal arcs) - MORE VISIBLE
+        for i in range(-4, 5):
+            y_pos = cy + i * 100
             points = []
-            for x in range(100, width - 100, 15):
-                # Create slight arc
-                arc = int(20 * math.sin((x - 100) / (width - 200) * math.pi))
+            for x in range(50, width - 50, 12):
+                arc = int(25 * math.sin((x - 50) / (width - 100) * math.pi))
                 points.append((x, y_pos + arc))
             if len(points) >= 2:
                 for j in range(len(points) - 1):
-                    draw.line([points[j], points[j+1]], fill=(*accent, 6), width=1)
+                    draw.line([points[j], points[j+1]], fill=(*accent, 18), width=1)
         
         # Add hub/node points (major logistics hubs)
         hubs = [
-            (width * 0.2, height * 0.25),   # North America
-            (width * 0.5, height * 0.3),    # Europe
-            (width * 0.75, height * 0.35),  # Asia
-            (width * 0.3, height * 0.65),   # South America
-            (width * 0.55, height * 0.7),   # Africa
-            (width * 0.8, height * 0.65),   # Australia
+            (width * 0.15, height * 0.25),   # North America
+            (width * 0.5, height * 0.28),    # Europe
+            (width * 0.78, height * 0.32),   # Asia
+            (width * 0.25, height * 0.62),   # South America
+            (width * 0.52, height * 0.68),   # Africa
+            (width * 0.82, height * 0.62),   # Australia
+            (width * 0.35, height * 0.45),   # Mid Atlantic
+            (width * 0.68, height * 0.5),    # Indian Ocean
         ]
         
-        # Draw connections between hubs (curved flight paths)
+        # Draw connections between hubs (curved flight paths) - MORE VISIBLE
         for i, (x1, y1) in enumerate(hubs):
             for j, (x2, y2) in enumerate(hubs):
-                if i < j and random.random() > 0.4:
-                    # Draw curved connection
+                if i < j and random.random() > 0.3:
                     mid_x = (x1 + x2) / 2
-                    mid_y = (y1 + y2) / 2 - 50  # Arc upward
+                    mid_y = (y1 + y2) / 2 - random.randint(40, 80)
                     
-                    # Bezier-like curve with segments
-                    steps = 30
+                    steps = 40
                     prev_point = None
                     for t in range(steps + 1):
                         tt = t / steps
-                        # Quadratic bezier
                         px = (1-tt)**2 * x1 + 2*(1-tt)*tt * mid_x + tt**2 * x2
                         py = (1-tt)**2 * y1 + 2*(1-tt)*tt * mid_y + tt**2 * y2
-                        if prev_point and t % 2 == 0:  # Dashed effect
-                            draw.line([prev_point, (px, py)], fill=(*accent, 15), width=1)
+                        if prev_point:
+                            # Solid lines, more visible
+                            draw.line([prev_point, (px, py)], fill=(*accent, 35), width=1)
                         prev_point = (px, py)
         
-        # Draw hub nodes
+        # Draw hub nodes - BIGGER and BRIGHTER
         for x, y in hubs:
             # Outer glow
-            for r in range(12, 3, -2):
-                alpha = int(8 * (12 - r) / 9)
+            for r in range(18, 4, -2):
+                alpha = int(20 * (18 - r) / 14)
                 draw.ellipse([(x-r, y-r), (x+r, y+r)], fill=(*accent, alpha))
-            # Center dot
-            draw.ellipse([(x-4, y-4), (x+4, y+4)], fill=(*accent, 40))
+            # Center dot - brighter
+            draw.ellipse([(x-5, y-5), (x+5, y+5)], fill=(*accent, 80))
+            # Small inner bright dot
+            draw.ellipse([(x-2, y-2), (x+2, y+2)], fill=(255, 255, 255, 100))
     
     @staticmethod
     def add_marble(img: Image.Image, color_theme: dict, seed: int = 42):
-        """Add elegant marble texture with flowing veins."""
+        """Add visible marble texture with flowing veins and cracks."""
         draw = ImageDraw.Draw(img)
         accent = color_theme["accent"]
         width, height = img.size
         
         random.seed(seed)
         
-        # Draw flowing marble veins - more organic curves
-        for vein_num in range(6):
+        # Draw main marble veins - more visible
+        for vein_num in range(10):
             # Start from different edges
-            if vein_num % 3 == 0:
+            if vein_num % 4 == 0:
                 x = random.randint(0, width // 3)
                 y = random.randint(0, height // 4)
-            elif vein_num % 3 == 1:
+            elif vein_num % 4 == 1:
                 x = random.randint(width * 2 // 3, width)
                 y = random.randint(0, height // 4)
+            elif vein_num % 4 == 2:
+                x = 0
+                y = random.randint(height // 4, height * 3 // 4)
             else:
-                x = random.randint(width // 3, width * 2 // 3)
-                y = 0
+                x = width
+                y = random.randint(height // 4, height * 3 // 4)
             
-            # Flow downward with curves
+            # Flow with curves
             points = [(x, y)]
-            direction = random.uniform(-0.3, 0.3)
+            direction = random.uniform(-0.4, 0.4)
             
-            while y < height + 100:
-                # Smooth curve progression
-                direction += random.uniform(-0.15, 0.15)
-                direction = max(-0.5, min(0.5, direction))
+            steps = random.randint(15, 25)
+            for _ in range(steps):
+                direction += random.uniform(-0.2, 0.2)
+                direction = max(-0.6, min(0.6, direction))
                 
-                x += int(40 * direction)
-                y += random.randint(40, 80)
+                x += int(50 * direction) + random.randint(-20, 20)
+                y += random.randint(30, 70)
+                x = max(0, min(width, x))
                 points.append((x, y))
             
-            # Draw vein with varying thickness
+            # Draw vein with varying thickness - MORE VISIBLE
             if len(points) >= 2:
                 for i in range(len(points) - 1):
-                    thickness = random.randint(1, 2)
-                    alpha = random.randint(10, 20)
+                    thickness = random.randint(1, 3)
+                    alpha = random.randint(30, 60)  # More visible
                     draw.line([points[i], points[i+1]], fill=(*accent, alpha), width=thickness)
                     
-                    # Add subtle branch occasionally
-                    if random.random() > 0.8:
-                        bx = points[i][0] + random.randint(-60, 60)
-                        by = points[i][1] + random.randint(20, 50)
-                        draw.line([points[i], (bx, by)], fill=(*accent, 8), width=1)
+                    # Add branches more often
+                    if random.random() > 0.6:
+                        bx = points[i][0] + random.randint(-80, 80)
+                        by = points[i][1] + random.randint(30, 70)
+                        draw.line([points[i], (bx, by)], fill=(*accent, 25), width=1)
+                        
+                        # Sub-branches
+                        if random.random() > 0.5:
+                            bx2 = bx + random.randint(-40, 40)
+                            by2 = by + random.randint(20, 40)
+                            draw.line([(bx, by), (bx2, by2)], fill=(*accent, 15), width=1)
     
     @staticmethod
     def add_vignette(img: Image.Image, strength: float = 0.6):
@@ -433,13 +445,14 @@ class CarouselRenderer:
             WIDTH, HEIGHT, self.color_theme, self.texture
         )
         
-        # Load fonts - ALL SAME SIZE except headline
+        # Load fonts - ALL SAME SIZE except headline and CTA
         self.font_headline = self.text_renderer.get_font("extrabold", HEADLINE_SIZE)
-        self.font_header = self.text_renderer.get_font("bold", BODY_SIZE)  # Same size as body, just bold
+        self.font_header = self.text_renderer.get_font("bold", HEADER_SIZE)  # Section headers
         self.font_body = self.text_renderer.get_font("regular", BODY_SIZE)
         self.font_body_bold = self.text_renderer.get_font("semibold", BODY_SIZE)
-        self.font_cta = self.text_renderer.get_font("semibold", BODY_SIZE)  # Same size as body
-        self.font_cta_extrabold = self.text_renderer.get_font("extrabold", BODY_SIZE + 4)  # STRUCTURE slightly bolder
+        # CTA fonts - WAY BIGGER for last slide
+        self.font_cta = self.text_renderer.get_font("semibold", CTA_SIZE)  # Bigger for CTA
+        self.font_cta_extrabold = self.text_renderer.get_font("extrabold", CTA_BIG_SIZE)  # STRUCTURE extra big
         
     def _load_logo(self) -> Image.Image:
         """Load the official STRUCTURE logo."""
@@ -578,21 +591,29 @@ class CarouselRenderer:
         return blocks
     
     def render_slide_2(self, content: str) -> Image.Image:
-        """Render slide 2 - Problem description with proper spacing."""
+        """Render slide 2 - Problem description with LEFT alignment and bold standout header."""
         img = self.background.copy()
         draw = ImageDraw.Draw(img)
         
         blocks = self._parse_content(content)
         left_margin = (WIDTH - MAX_TEXT_WIDTH) // 2
         
+        # Get standout header font
+        standout_font = self.text_renderer.get_font("extrabold", STANDOUT_HEADER_SIZE)
+        
         # Calculate total height with spacing
         total_height = 0
         prev_was_bullet = False
+        first_block_is_standout = len(blocks) > 0 and blocks[0]['type'] == 'paragraph'
         
         for i, block in enumerate(blocks):
             is_bullet = block['type'] == 'bullet'
             
-            if block['type'] == 'header':
+            # First paragraph becomes standout header
+            if i == 0 and first_block_is_standout:
+                font = standout_font
+                line_height = STANDOUT_HEADER_SIZE + 20
+            elif block['type'] == 'header':
                 font = self.font_header
                 line_height = LINE_HEIGHT_HEADER
             elif is_bullet:
@@ -605,11 +626,11 @@ class CarouselRenderer:
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             total_height += len(wrapped) * line_height
             
-            # Add spacing BEFORE bullets group or after bullets group
+            # Add spacing
             if is_bullet and not prev_was_bullet:
-                total_height += PARAGRAPH_SPACING  # Space before bullet group
+                total_height += PARAGRAPH_SPACING
             elif not is_bullet and prev_was_bullet:
-                total_height += PARAGRAPH_SPACING  # Space after bullet group
+                total_height += PARAGRAPH_SPACING
             elif block['add_space_before'] and not is_bullet:
                 total_height += PARAGRAPH_SPACING
             
@@ -620,23 +641,25 @@ class CarouselRenderer:
         current_y = start_y
         
         accent_band = self.color_theme["accent_band"]
+        accent = self.color_theme["accent"]
         prev_was_bullet = False
         
         for i, block in enumerate(blocks):
             is_bullet = block['type'] == 'bullet'
             
-            # Add spacing BEFORE bullets group
+            # Spacing
             if is_bullet and not prev_was_bullet:
                 current_y += PARAGRAPH_SPACING
-            # Add spacing AFTER bullets group (before this non-bullet)
             elif not is_bullet and prev_was_bullet:
                 current_y += PARAGRAPH_SPACING
-            # Regular paragraph spacing
             elif block['add_space_before'] and not is_bullet:
                 current_y += PARAGRAPH_SPACING
             
-            # Choose font and line height based on type
-            if block['type'] == 'header':
+            # Font selection - first block gets standout treatment
+            if i == 0 and first_block_is_standout:
+                font = standout_font
+                line_height = STANDOUT_HEADER_SIZE + 20
+            elif block['type'] == 'header':
                 font = self.font_header
                 line_height = LINE_HEIGHT_HEADER
             elif is_bullet:
@@ -648,7 +671,7 @@ class CarouselRenderer:
             
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             
-            for line in wrapped:
+            for j, line in enumerate(wrapped):
                 if current_y > HEIGHT - 80:
                     break
                 
@@ -659,7 +682,13 @@ class CarouselRenderer:
                         fill=accent_band
                     )
                 
-                x = self._get_text_x(line, font, draw) if self.layout["text_align"] == "center" else left_margin
+                # Standout header gets accent underline on first line
+                if i == 0 and first_block_is_standout and j == len(wrapped) - 1:
+                    underline_y = current_y + line_height - 10
+                    draw.line([(left_margin, underline_y), (left_margin + 200, underline_y)], fill=accent, width=4)
+                
+                # ALWAYS LEFT ALIGNED for middle slides
+                x = left_margin
                 self.text_renderer.draw_text_with_shadow(draw, line, (x, current_y), font)
                 current_y += line_height
             
@@ -668,16 +697,22 @@ class CarouselRenderer:
         return img
     
     def render_slide_3(self, content: str) -> Image.Image:
-        """Render slide 3 - Solution slide with centered content and logo at bottom."""
+        """Render slide 3 - Solution slide with LEFT alignment, bold header, and logo at bottom."""
         img = self.background.copy()
         draw = ImageDraw.Draw(img)
         
         blocks = self._parse_content(content)
         left_margin = (WIDTH - MAX_TEXT_WIDTH) // 2
         
+        # Get standout header font
+        standout_font = self.text_renderer.get_font("extrabold", STANDOUT_HEADER_SIZE)
+        
         # Reserve space for logo at bottom
         logo_area_height = 120 if self.logo else 0
         max_y = HEIGHT - logo_area_height - 60
+        
+        # Check if first block should be standout
+        first_block_is_standout = len(blocks) > 0 and blocks[0]['type'] in ['paragraph', 'header']
         
         # Calculate total height with spacing
         total_height = 0
@@ -686,7 +721,11 @@ class CarouselRenderer:
         for i, block in enumerate(blocks):
             is_bullet = block['type'] == 'bullet'
             
-            if block['type'] == 'header':
+            # First block gets standout treatment
+            if i == 0 and first_block_is_standout:
+                font = standout_font
+                line_height = STANDOUT_HEADER_SIZE + 20
+            elif block['type'] == 'header':
                 font = self.font_header
                 line_height = LINE_HEIGHT_HEADER
             elif is_bullet:
@@ -699,7 +738,7 @@ class CarouselRenderer:
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             total_height += len(wrapped) * line_height
             
-            # Add spacing BEFORE bullets group or after bullets group
+            # Add spacing
             if is_bullet and not prev_was_bullet:
                 total_height += PARAGRAPH_SPACING
             elif not is_bullet and prev_was_bullet:
@@ -715,26 +754,28 @@ class CarouselRenderer:
         current_y = start_y
         
         accent_band = self.color_theme["accent_band"]
+        accent = self.color_theme["accent"]
         prev_was_bullet = False
         
-        for block in blocks:
+        for i, block in enumerate(blocks):
             if current_y > max_y:
                 break
             
             is_bullet = block['type'] == 'bullet'
             
-            # Add spacing BEFORE bullets group
+            # Spacing
             if is_bullet and not prev_was_bullet:
                 current_y += PARAGRAPH_SPACING
-            # Add spacing AFTER bullets group
             elif not is_bullet and prev_was_bullet:
                 current_y += PARAGRAPH_SPACING
-            # Regular paragraph spacing
             elif block['add_space_before'] and not is_bullet:
                 current_y += PARAGRAPH_SPACING
             
-            # Choose font and line height based on type
-            if block['type'] == 'header':
+            # Font selection
+            if i == 0 and first_block_is_standout:
+                font = standout_font
+                line_height = STANDOUT_HEADER_SIZE + 20
+            elif block['type'] == 'header':
                 font = self.font_header
                 line_height = LINE_HEIGHT_HEADER
             elif is_bullet:
@@ -746,7 +787,7 @@ class CarouselRenderer:
             
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             
-            for line in wrapped:
+            for j, line in enumerate(wrapped):
                 if current_y > max_y:
                     break
                 
@@ -757,7 +798,13 @@ class CarouselRenderer:
                         fill=accent_band
                     )
                 
-                x = self._get_text_x(line, font, draw) if self.layout["text_align"] == "center" else left_margin
+                # Standout header gets accent underline
+                if i == 0 and first_block_is_standout and j == len(wrapped) - 1:
+                    underline_y = current_y + line_height - 10
+                    draw.line([(left_margin, underline_y), (left_margin + 200, underline_y)], fill=accent, width=4)
+                
+                # ALWAYS LEFT ALIGNED for middle slides
+                x = left_margin
                 self.text_renderer.draw_text_with_shadow(draw, line, (x, current_y), font)
                 current_y += line_height
             
