@@ -12,7 +12,7 @@ COPY frontend/ ./frontend/
 RUN cd frontend && npm run build
 
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
 RUN mkdir -p backend/static && cp -r frontend/dist/* backend/static/
@@ -21,6 +21,4 @@ WORKDIR /app/backend
 
 ENV PORT=8000
 
-EXPOSE 8000
-
-CMD gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
+CMD uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 30
