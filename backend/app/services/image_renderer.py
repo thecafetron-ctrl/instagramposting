@@ -29,18 +29,15 @@ BLACK = (0, 0, 0)
 
 # Typography - MASSIVE headlines, SAME SIZE for all body text
 HEADLINE_SIZE = 96  # MASSIVE headlines for slide 1
-HEADER_SIZE = 42  # Section headers - slightly bigger, bold
-BODY_SIZE = 34  # Regular body text
-CTA_SIZE = 48  # BIGGER for last slide
-CTA_BIG_SIZE = 56  # Even bigger for CTA emphasis
+BODY_SIZE = 34  # ALL body text same size
+CTA_SIZE = 48  # BIGGER for last slide only
+CTA_BIG_SIZE = 56  # "STRUCTURE" on last slide
 LINE_HEIGHT_HEADLINE = 110
-LINE_HEIGHT_HEADER = 58
 LINE_HEIGHT_BODY = 50
 LINE_HEIGHT_CTA = 65
 PARAGRAPH_SPACING = 45  # Space between paragraphs/sections
 BULLET_LINE_HEIGHT = 46  # Tighter line height for bullets
 MAX_TEXT_WIDTH = 900
-STANDOUT_HEADER_SIZE = 44  # Bold standout line at top of middle slides
 
 
 class TextRenderer:
@@ -445,14 +442,13 @@ class CarouselRenderer:
             WIDTH, HEIGHT, self.color_theme, self.texture
         )
         
-        # Load fonts - ALL SAME SIZE except headline and CTA
+        # Load fonts - ALL SAME SIZE except headline and last slide CTA
         self.font_headline = self.text_renderer.get_font("extrabold", HEADLINE_SIZE)
-        self.font_header = self.text_renderer.get_font("bold", HEADER_SIZE)  # Section headers
         self.font_body = self.text_renderer.get_font("regular", BODY_SIZE)
-        self.font_body_bold = self.text_renderer.get_font("semibold", BODY_SIZE)
-        # CTA fonts - WAY BIGGER for last slide
-        self.font_cta = self.text_renderer.get_font("semibold", CTA_SIZE)  # Bigger for CTA
-        self.font_cta_extrabold = self.text_renderer.get_font("extrabold", CTA_BIG_SIZE)  # STRUCTURE extra big
+        self.font_body_bold = self.text_renderer.get_font("bold", BODY_SIZE)  # Bold same size
+        # CTA fonts - BIGGER for last slide only
+        self.font_cta = self.text_renderer.get_font("semibold", CTA_SIZE)
+        self.font_cta_extrabold = self.text_renderer.get_font("extrabold", CTA_BIG_SIZE)
         
     def _load_logo(self) -> Image.Image:
         """Load the official STRUCTURE logo."""
@@ -591,42 +587,26 @@ class CarouselRenderer:
         return blocks
     
     def render_slide_2(self, content: str) -> Image.Image:
-        """Render slide 2 - Problem description with LEFT alignment and bold standout header."""
+        """Render slide 2 - Problem description with LEFT alignment, same size text, bold for emphasis."""
         img = self.background.copy()
         draw = ImageDraw.Draw(img)
         
         blocks = self._parse_content(content)
         left_margin = (WIDTH - MAX_TEXT_WIDTH) // 2
         
-        # Get standout header font
-        standout_font = self.text_renderer.get_font("extrabold", STANDOUT_HEADER_SIZE)
-        
-        # Calculate total height with spacing
+        # Calculate total height - ALL SAME SIZE
         total_height = 0
         prev_was_bullet = False
-        first_block_is_standout = len(blocks) > 0 and blocks[0]['type'] == 'paragraph'
         
-        for i, block in enumerate(blocks):
+        for block in blocks:
             is_bullet = block['type'] == 'bullet'
-            
-            # First paragraph becomes standout header
-            if i == 0 and first_block_is_standout:
-                font = standout_font
-                line_height = STANDOUT_HEADER_SIZE + 20
-            elif block['type'] == 'header':
-                font = self.font_header
-                line_height = LINE_HEIGHT_HEADER
-            elif is_bullet:
-                font = self.font_body_bold
-                line_height = BULLET_LINE_HEIGHT
-            else:
-                font = self.font_body_bold if block['is_bold'] else self.font_body
-                line_height = LINE_HEIGHT_BODY
+            line_height = BULLET_LINE_HEIGHT if is_bullet else LINE_HEIGHT_BODY
+            font = self.font_body_bold if block['is_bold'] else self.font_body
             
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             total_height += len(wrapped) * line_height
             
-            # Add spacing
+            # Add spacing between sections
             if is_bullet and not prev_was_bullet:
                 total_height += PARAGRAPH_SPACING
             elif not is_bullet and prev_was_bullet:
@@ -641,13 +621,12 @@ class CarouselRenderer:
         current_y = start_y
         
         accent_band = self.color_theme["accent_band"]
-        accent = self.color_theme["accent"]
         prev_was_bullet = False
         
-        for i, block in enumerate(blocks):
+        for block in blocks:
             is_bullet = block['type'] == 'bullet'
             
-            # Spacing
+            # Spacing between sections
             if is_bullet and not prev_was_bullet:
                 current_y += PARAGRAPH_SPACING
             elif not is_bullet and prev_was_bullet:
@@ -655,39 +634,24 @@ class CarouselRenderer:
             elif block['add_space_before'] and not is_bullet:
                 current_y += PARAGRAPH_SPACING
             
-            # Font selection - first block gets standout treatment
-            if i == 0 and first_block_is_standout:
-                font = standout_font
-                line_height = STANDOUT_HEADER_SIZE + 20
-            elif block['type'] == 'header':
-                font = self.font_header
-                line_height = LINE_HEIGHT_HEADER
-            elif is_bullet:
-                font = self.font_body_bold
-                line_height = BULLET_LINE_HEIGHT
-            else:
-                font = self.font_body_bold if block['is_bold'] else self.font_body
-                line_height = LINE_HEIGHT_BODY
+            # ALL SAME SIZE - just bold or regular
+            line_height = BULLET_LINE_HEIGHT if is_bullet else LINE_HEIGHT_BODY
+            font = self.font_body_bold if block['is_bold'] else self.font_body
             
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             
-            for j, line in enumerate(wrapped):
+            for line in wrapped:
                 if current_y > HEIGHT - 80:
                     break
                 
-                # Accent band for headers
+                # Accent band only for explicit headers like "How AI fixes this"
                 if block['type'] == 'header':
                     draw.rectangle(
-                        [left_margin - 15, current_y - 5, left_margin + MAX_TEXT_WIDTH + 15, current_y + line_height - 15],
+                        [left_margin - 15, current_y - 5, left_margin + MAX_TEXT_WIDTH + 15, current_y + LINE_HEIGHT_BODY - 15],
                         fill=accent_band
                     )
                 
-                # Standout header gets accent underline on first line
-                if i == 0 and first_block_is_standout and j == len(wrapped) - 1:
-                    underline_y = current_y + line_height - 10
-                    draw.line([(left_margin, underline_y), (left_margin + 200, underline_y)], fill=accent, width=4)
-                
-                # ALWAYS LEFT ALIGNED for middle slides
+                # LEFT ALIGNED
                 x = left_margin
                 self.text_renderer.draw_text_with_shadow(draw, line, (x, current_y), font)
                 current_y += line_height
@@ -697,48 +661,30 @@ class CarouselRenderer:
         return img
     
     def render_slide_3(self, content: str) -> Image.Image:
-        """Render slide 3 - Solution slide with LEFT alignment, bold header, and logo at bottom."""
+        """Render slide 3 - Solution slide with LEFT alignment, same size text, bold for emphasis, logo at bottom."""
         img = self.background.copy()
         draw = ImageDraw.Draw(img)
         
         blocks = self._parse_content(content)
         left_margin = (WIDTH - MAX_TEXT_WIDTH) // 2
         
-        # Get standout header font
-        standout_font = self.text_renderer.get_font("extrabold", STANDOUT_HEADER_SIZE)
-        
         # Reserve space for logo at bottom
         logo_area_height = 120 if self.logo else 0
         max_y = HEIGHT - logo_area_height - 60
         
-        # Check if first block should be standout
-        first_block_is_standout = len(blocks) > 0 and blocks[0]['type'] in ['paragraph', 'header']
-        
-        # Calculate total height with spacing
+        # Calculate total height - ALL SAME SIZE
         total_height = 0
         prev_was_bullet = False
         
-        for i, block in enumerate(blocks):
+        for block in blocks:
             is_bullet = block['type'] == 'bullet'
-            
-            # First block gets standout treatment
-            if i == 0 and first_block_is_standout:
-                font = standout_font
-                line_height = STANDOUT_HEADER_SIZE + 20
-            elif block['type'] == 'header':
-                font = self.font_header
-                line_height = LINE_HEIGHT_HEADER
-            elif is_bullet:
-                font = self.font_body_bold
-                line_height = BULLET_LINE_HEIGHT
-            else:
-                font = self.font_body_bold if block['is_bold'] else self.font_body
-                line_height = LINE_HEIGHT_BODY
+            line_height = BULLET_LINE_HEIGHT if is_bullet else LINE_HEIGHT_BODY
+            font = self.font_body_bold if block['is_bold'] else self.font_body
             
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             total_height += len(wrapped) * line_height
             
-            # Add spacing
+            # Add spacing between sections
             if is_bullet and not prev_was_bullet:
                 total_height += PARAGRAPH_SPACING
             elif not is_bullet and prev_was_bullet:
@@ -754,16 +700,15 @@ class CarouselRenderer:
         current_y = start_y
         
         accent_band = self.color_theme["accent_band"]
-        accent = self.color_theme["accent"]
         prev_was_bullet = False
         
-        for i, block in enumerate(blocks):
+        for block in blocks:
             if current_y > max_y:
                 break
             
             is_bullet = block['type'] == 'bullet'
             
-            # Spacing
+            # Spacing between sections
             if is_bullet and not prev_was_bullet:
                 current_y += PARAGRAPH_SPACING
             elif not is_bullet and prev_was_bullet:
@@ -771,37 +716,22 @@ class CarouselRenderer:
             elif block['add_space_before'] and not is_bullet:
                 current_y += PARAGRAPH_SPACING
             
-            # Font selection
-            if i == 0 and first_block_is_standout:
-                font = standout_font
-                line_height = STANDOUT_HEADER_SIZE + 20
-            elif block['type'] == 'header':
-                font = self.font_header
-                line_height = LINE_HEIGHT_HEADER
-            elif is_bullet:
-                font = self.font_body_bold
-                line_height = BULLET_LINE_HEIGHT
-            else:
-                font = self.font_body_bold if block['is_bold'] else self.font_body
-                line_height = LINE_HEIGHT_BODY
+            # ALL SAME SIZE - just bold or regular
+            line_height = BULLET_LINE_HEIGHT if is_bullet else LINE_HEIGHT_BODY
+            font = self.font_body_bold if block['is_bold'] else self.font_body
             
             wrapped = self._wrap_text(block['text'], font, MAX_TEXT_WIDTH, draw)
             
-            for j, line in enumerate(wrapped):
+            for line in wrapped:
                 if current_y > max_y:
                     break
                 
-                # Accent band for headers
+                # Accent band only for explicit headers
                 if block['type'] == 'header':
                     draw.rectangle(
-                        [left_margin - 15, current_y - 5, left_margin + MAX_TEXT_WIDTH + 15, current_y + line_height - 15],
+                        [left_margin - 15, current_y - 5, left_margin + MAX_TEXT_WIDTH + 15, current_y + LINE_HEIGHT_BODY - 15],
                         fill=accent_band
                     )
-                
-                # Standout header gets accent underline
-                if i == 0 and first_block_is_standout and j == len(wrapped) - 1:
-                    underline_y = current_y + line_height - 10
-                    draw.line([(left_margin, underline_y), (left_margin + 200, underline_y)], fill=accent, width=4)
                 
                 # ALWAYS LEFT ALIGNED for middle slides
                 x = left_margin
