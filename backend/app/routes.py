@@ -124,6 +124,20 @@ async def health_check():
     return HealthResponse(status="healthy", version="2.0.0")
 
 
+@router.get("/debug")
+async def debug_info():
+    """Debug endpoint to check configuration."""
+    import os
+    from app.config import get_settings
+    s = get_settings()
+    return {
+        "database_url_set": bool(s.database_url),
+        "database_url_prefix": s.database_url[:30] + "..." if s.database_url else None,
+        "openai_key_set": bool(s.openai_api_key),
+        "env_database_url": bool(os.environ.get("DATABASE_URL")),
+    }
+
+
 @router.get("/templates", response_model=list[TemplateResponse])
 async def list_templates():
     """Get all available content templates."""
@@ -310,13 +324,17 @@ async def list_posts(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all generated posts."""
-    result = await db.execute(
-        select(Post)
-        .order_by(desc(Post.created_at))
-        .limit(limit)
-        .offset(offset)
-    )
-    posts = result.scalars().all()
+    try:
+        result = await db.execute(
+            select(Post)
+            .order_by(desc(Post.created_at))
+            .limit(limit)
+            .offset(offset)
+        )
+        posts = result.scalars().all()
+    except Exception as e:
+        print(f"Database error in posts: {e}")
+        return []
     
     return [
         PostResponse(
@@ -487,32 +505,48 @@ class ScheduledPostResponse(BaseModel):
 @router.get("/auto-post/settings")
 async def get_auto_post_settings(db: AsyncSession = Depends(get_db)):
     """Get auto-posting settings."""
-    result = await db.execute(select(AutoPostSettings).limit(1))
-    settings_row = result.scalar_one_or_none()
-    
-    if not settings_row:
-        # Create default settings
-        settings_row = AutoPostSettings(
+    try:
+        result = await db.execute(select(AutoPostSettings).limit(1))
+        settings_row = result.scalar_one_or_none()
+        
+        if not settings_row:
+            # Create default settings
+            settings_row = AutoPostSettings(
+                enabled=False,
+                posts_per_day=3,
+                default_slide_count=4
+            )
+            db.add(settings_row)
+            await db.commit()
+            await db.refresh(settings_row)
+        
+        return AutoPostSettingsResponse(
+            id=settings_row.id,
+            enabled=settings_row.enabled,
+            posts_per_day=settings_row.posts_per_day,
+            default_template_id=settings_row.default_template_id,
+            default_color_theme=settings_row.default_color_theme,
+            default_texture=settings_row.default_texture,
+            default_layout=settings_row.default_layout,
+            default_slide_count=settings_row.default_slide_count,
+            instagram_username=settings_row.instagram_username,
+            has_credentials=bool(settings_row.instagram_password)
+        )
+    except Exception as e:
+        print(f"Database error in auto-post/settings: {e}")
+        # Return default settings if DB fails
+        return AutoPostSettingsResponse(
+            id=0,
             enabled=False,
             posts_per_day=3,
-            default_slide_count=4
+            default_template_id=None,
+            default_color_theme=None,
+            default_texture=None,
+            default_layout=None,
+            default_slide_count=4,
+            instagram_username=None,
+            has_credentials=False
         )
-        db.add(settings_row)
-        await db.commit()
-        await db.refresh(settings_row)
-    
-    return AutoPostSettingsResponse(
-        id=settings_row.id,
-        enabled=settings_row.enabled,
-        posts_per_day=settings_row.posts_per_day,
-        default_template_id=settings_row.default_template_id,
-        default_color_theme=settings_row.default_color_theme,
-        default_texture=settings_row.default_texture,
-        default_layout=settings_row.default_layout,
-        default_slide_count=settings_row.default_slide_count,
-        instagram_username=settings_row.instagram_username,
-        has_credentials=bool(settings_row.instagram_password)
-    )
 
 
 @router.put("/auto-post/settings")
@@ -565,13 +599,17 @@ async def list_scheduled_posts(
     db: AsyncSession = Depends(get_db)
 ):
     """List scheduled posts."""
-    query = select(ScheduledPost).order_by(ScheduledPost.scheduled_time)
-    
-    if status:
-        query = query.where(ScheduledPost.status == status)
-    
-    result = await db.execute(query.limit(limit))
-    posts = result.scalars().all()
+    try:
+        query = select(ScheduledPost).order_by(ScheduledPost.scheduled_time)
+        
+        if status:
+            query = query.where(ScheduledPost.status == status)
+        
+        result = await db.execute(query.limit(limit))
+        posts = result.scalars().all()
+    except Exception as e:
+        print(f"Database error in scheduled-posts: {e}")
+        return []
     
     return [
         ScheduledPostResponse(
