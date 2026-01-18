@@ -203,10 +203,14 @@ async def generate_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost,
         layout_id=layout
     )
     
-    # Build slide texts list
+    # Build slide texts list (use _text keys which have formatted strings)
     slide_texts = []
     for i in range(1, slide_count + 1):
-        slide_texts.append(content.get(f"slide_{i}", ""))
+        # Try _text key first, fall back to raw key
+        text = content.get(f"slide_{i}_text") or content.get(f"slide_{i}", "")
+        if isinstance(text, dict):
+            text = str(text)  # Convert dict to string if needed
+        slide_texts.append(text)
     
     image_paths_list = renderer.render_all_slides(slide_texts)
     
@@ -229,16 +233,16 @@ async def generate_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost,
         if f"slide_{i}" in images:
             metadata[f"slide_{i}_image"] = images[f"slide_{i}"]
     
-    # Create post record
+    # Create post record (use _text keys for formatted content)
     post = Post(
         topic=topic,
         template_id=template_id,
-        slide_1_text=content.get("slide_1", ""),
-        slide_2_text=content.get("slide_2", ""),
-        slide_3_text=content.get("slide_3", ""),
-        slide_4_text=content.get("slide_4", ""),
-        caption=content.get("caption", ""),
-        hashtags=content.get("hashtags", ""),
+        slide_1_text=content.get("slide_1_text", content.get("slide_1", "")),
+        slide_2_text=content.get("slide_2_text", content.get("slide_2", "")),
+        slide_3_text=content.get("slide_3_text", content.get("slide_3", "")),
+        slide_4_text=content.get("slide_4_text", content.get("slide_4", "")),
+        caption=content.get("caption_formatted", content.get("caption", "")),
+        hashtags=content.get("hashtags_text", content.get("hashtags", "")),
         slide_1_image=images.get("slide_1"),
         slide_2_image=images.get("slide_2"),
         slide_3_image=images.get("slide_3"),
