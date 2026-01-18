@@ -1,17 +1,17 @@
 [phases.setup]
-nixPkgs = ["python313", "nodejs_20", "cairo", "pango", "gdk-pixbuf", "libffi", "zlib"]
+nixPkgs = ["python313", "nodejs_20", "cairo", "pango", "gdk-pixbuf", "pkg-config", "libffi", "zlib", "gcc"]
 
 [phases.install]
 cmds = [
-    "cd backend && pip install -r requirements.txt",
-    "cd frontend && npm install && npm run build"
+    "cd frontend && npm ci && npm run build",
+    "cd backend && pip install --upgrade pip && pip install -r requirements.txt"
 ]
 
 [phases.build]
 cmds = [
     "mkdir -p backend/static",
-    "cp -r frontend/dist/* backend/static/"
+    "cp -r frontend/dist/* backend/static/ || true"
 ]
 
 [start]
-cmd = "cd backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+cmd = "cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
