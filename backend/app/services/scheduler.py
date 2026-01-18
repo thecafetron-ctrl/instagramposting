@@ -15,8 +15,8 @@ from app.models import ScheduledPost, AutoPostSettings, Post
 from app.services.instagram_poster import post_carousel_to_instagram
 from app.services.content_generator import generate_carousel_content
 from app.services.image_renderer import get_renderer
-from app.templates import get_template
 from app.design_templates import list_color_themes, list_textures, list_layouts
+from app.templates import get_all_templates
 from app.config import get_settings
 import random
 
@@ -164,7 +164,6 @@ async def generate_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost,
     
     # Randomize if set to random
     if template_id == "random":
-        from app.templates import get_all_templates
         templates = get_all_templates()
         template_id = random.choice([t["id"] for t in templates])
     
@@ -184,19 +183,14 @@ async def generate_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost,
         else:
             layout = random.choice([l["id"] for l in layouts if l["id"] != "centered"])
     
-    # Generate content
-    template = get_template(template_id)
-    if not template:
-        template = get_template("problem_first")
-    
     # Simple topic discovery - just use a generic topic
     topic = f"AI-Powered Logistics Optimization #{random.randint(1000, 9999)}"
     
     content = await generate_carousel_content(
         topic=topic,
-        template=template,
-        enrichment_data=None,
-        slide_count=slide_count
+        template_id=template_id,
+        slide_count=slide_count,
+        enrichment=None
     )
     
     if not content:
