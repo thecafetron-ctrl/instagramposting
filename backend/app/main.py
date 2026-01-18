@@ -11,7 +11,6 @@ import os
 
 from app.routes import router
 
-# Create app WITHOUT lifespan to avoid blocking
 app = FastAPI(title="Instagram Carousel Generator", version="1.0.0")
 
 # CORS
@@ -27,41 +26,49 @@ app.add_middleware(
 Path("generated_images").mkdir(exist_ok=True)
 Path("static").mkdir(exist_ok=True)
 
-# API routes
+# API routes FIRST
 app.include_router(router, prefix="/api")
 
-# Images
+# Mount generated images
 app.mount("/images", StaticFiles(directory="generated_images"), name="images")
 
 # Health check
 @app.get("/health")
-@app.get("/api/health")
+@app.get("/api/health") 
 def health():
     return {"status": "ok"}
 
-# Frontend
+# Mount static assets BEFORE catch-all
+static_path = Path("static")
+if static_path.exists():
+    # Mount the assets subfolder for JS/CSS
+    assets_path = static_path / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+
+# Serve index.html for root
 @app.get("/")
-async def root():
-    index = Path("static/index.html")
-    if index.exists():
-        return FileResponse(index)
-    return {"api": "running", "frontend": "not found"}
+async def serve_index():
+    index_path = Path("static/index.html")
+    if index_path.exists():
+        return FileResponse(index_path, media_type="text/html")
+    return JSONResponse({"error": "Frontend not built"}, status_code=404)
 
-@app.get("/assets/{path:path}")
-async def assets(path: str):
-    f = Path(f"static/assets/{path}")
-    if f.exists():
-        return FileResponse(f)
-    return JSONResponse({"error": "not found"}, 404)
-
-@app.get("/{path:path}")
-async def spa(path: str):
-    if path.startswith("api") or path.startswith("images"):
-        return JSONResponse({"error": "not found"}, 404)
-    f = Path(f"static/{path}")
-    if f.exists() and f.is_file():
-        return FileResponse(f)
-    index = Path("static/index.html")
-    if index.exists():
-        return FileResponse(index)
-    return JSONResponse({"error": "not found"}, 404)
+# SPA catch-all - serve index.html for all other routes
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    # Skip API routes
+    if full_path.startswith("api") or full_path.startswith("images") or full_path.startswith("assets"):
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    
+    # Try exact file first
+    file_path = Path("static") / full_path
+    if file_path.exists() and file_path.is_file():
+        return FileResponse(file_path)
+    
+    # Fall back to index.html for SPA routing
+    index_path = Path("static/index.html")
+    if index_path.exists():
+        return FileResponse(index_path, media_type="text/html")
+    
+    return JSONResponse({"error": "Not found"}, status_code=404)
