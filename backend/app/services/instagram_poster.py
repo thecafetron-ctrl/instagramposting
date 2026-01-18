@@ -37,14 +37,19 @@ async def upload_image_to_hosting(image_path: str, base_url: str) -> str:
     """
     Get a publicly accessible URL for the image.
     The Instagram API requires images to be accessible via public URL.
-    
-    For local development, we'll use the API server's own endpoint.
-    In production, you'd upload to a CDN or cloud storage.
     """
-    # Extract filename from path
+    # Extract just the filename (remove any path like generated_images/)
     filename = os.path.basename(image_path)
-    # Return the URL that serves the image through our API
-    return f"{base_url}/images/{filename}"
+    
+    # Clean up base_url - remove trailing slash and any /images suffix
+    base_url = base_url.rstrip('/')
+    if base_url.endswith('/images'):
+        base_url = base_url[:-7]
+    
+    # Build clean URL
+    url = f"{base_url}/images/{filename}"
+    print(f"Built image URL: {url} (from path: {image_path})")
+    return url
 
 
 _last_ig_error = None
