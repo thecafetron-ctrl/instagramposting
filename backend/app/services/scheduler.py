@@ -197,13 +197,37 @@ async def generate_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost,
         return None
     
     # Render images
-    renderer = get_renderer()
-    images = renderer.render_all_slides(
-        content=content,
-        color_theme=color_theme,
-        texture=texture,
-        layout=layout
+    renderer = get_renderer(
+        color_id=color_theme,
+        texture_id=texture,
+        layout_id=layout
     )
+    
+    # Build slide texts list
+    slide_texts = []
+    for i in range(1, slide_count + 1):
+        slide_texts.append(content.get(f"slide_{i}", ""))
+    
+    image_paths_list = renderer.render_all_slides(slide_texts)
+    
+    # Convert to dict
+    images = {}
+    for i, path in enumerate(image_paths_list, 1):
+        images[f"slide_{i}"] = path
+    
+    # Build metadata with extra slides
+    metadata = {
+        "color_theme": color_theme,
+        "texture": texture,
+        "layout": layout,
+        "slide_count": slide_count,
+        "auto_generated": True
+    }
+    
+    # Add extra slide images to metadata
+    for i in range(5, slide_count + 1):
+        if f"slide_{i}" in images:
+            metadata[f"slide_{i}_image"] = images[f"slide_{i}"]
     
     # Create post record
     post = Post(
@@ -219,13 +243,7 @@ async def generate_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost,
         slide_2_image=images.get("slide_2"),
         slide_3_image=images.get("slide_3"),
         slide_4_image=images.get("slide_4"),
-        metadata_json={
-            "color_theme": color_theme,
-            "texture": texture,
-            "layout": layout,
-            "slide_count": slide_count,
-            "auto_generated": True
-        }
+        metadata_json=metadata
     )
     
     db.add(post)
