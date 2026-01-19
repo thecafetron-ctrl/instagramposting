@@ -77,3 +77,31 @@ class AutoPostSettings(Base):
     instagram_password = Column(Text, nullable=True)  # Should be encrypted in production
     
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Lead(Base):
+    """Track leads from Instagram posts."""
+    __tablename__ = "leads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Lead info
+    name = Column(String(200), nullable=False)
+    instagram_handle = Column(String(100), nullable=True)
+    email = Column(String(200), nullable=True)
+    phone = Column(String(50), nullable=True)
+    company = Column(String(200), nullable=True)
+    
+    # Status tracking
+    status = Column(String(50), default="new")  # new, no_answer, follow_up, booked, closed, lost
+    follow_up_date = Column(DateTime(timezone=True), nullable=True)
+    
+    # Source tracking
+    source_post_id = Column(Integer, nullable=True)  # Which post they came from
+    source = Column(String(100), nullable=True)  # e.g. "Instagram DM", "Comment", etc.
+    
+    # Notes
+    notes = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

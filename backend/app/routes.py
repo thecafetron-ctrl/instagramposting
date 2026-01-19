@@ -26,7 +26,7 @@ def weighted_layout_choice(layout_ids: list) -> str:
     return random.choice(layout_ids)
 
 from app.database import get_db
-from app.models import Post, UsedTopic, ScheduledPost, AutoPostSettings
+from app.models import Post, UsedTopic, ScheduledPost, AutoPostSettings, Lead
 from app.templates import get_all_templates, get_template
 from app.design_templates import (
     list_design_templates, get_design_template,
@@ -892,4 +892,233 @@ async def test_instagram_post(
             post.slide_4_image
         ],
         "caption_preview": post.caption[:200] + "..." if len(post.caption) > 200 else post.caption
+    }
+
+
+# ============================================================================
+# LEAD MANAGEMENT ENDPOINTS
+# ============================================================================
+
+class CreateLeadRequest(BaseModel):
+    name: str
+    instagram_handle: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    status: Optional[str] = "new"
+    follow_up_date: Optional[datetime] = None
+    source_post_id: Optional[int] = None
+    source: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class UpdateLeadRequest(BaseModel):
+    name: Optional[str] = None
+    instagram_handle: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    status: Optional[str] = None
+    follow_up_date: Optional[datetime] = None
+    source_post_id: Optional[int] = None
+    source: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.get("/leads")
+async def list_leads(
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all leads, optionally filtered by status."""
+    query = select(Lead).order_by(desc(Lead.created_at))
+    
+    if status:
+        query = query.where(Lead.status == status)
+    
+    result = await db.execute(query)
+    leads = result.scalars().all()
+    
+    return [
+        {
+            "id": lead.id,
+            "name": lead.name,
+            "instagram_handle": lead.instagram_handle,
+            "email": lead.email,
+            "phone": lead.phone,
+            "company": lead.company,
+            "status": lead.status,
+            "follow_up_date": lead.follow_up_date.isoformat() if lead.follow_up_date else None,
+            "source_post_id": lead.source_post_id,
+            "source": lead.source,
+            "notes": lead.notes,
+            "created_at": lead.created_at.isoformat() if lead.created_at else None,
+            "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
+        }
+        for lead in leads
+    ]
+
+
+@router.get("/leads/statuses")
+async def get_lead_statuses():
+    """Get available lead statuses."""
+    return [
+        {"id": "new", "label": "New", "color": "#6c757d"},
+        {"id": "no_answer", "label": "No Answer", "color": "#ffc107"},
+        {"id": "follow_up", "label": "Follow Up", "color": "#17a2b8"},
+        {"id": "booked", "label": "Booked", "color": "#28a745"},
+        {"id": "closed", "label": "Closed (Won)", "color": "#007bff"},
+        {"id": "lost", "label": "Lost", "color": "#dc3545"},
+    ]
+
+
+@router.post("/leads")
+async def create_lead(
+    request: CreateLeadRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new lead."""
+    lead = Lead(
+        name=request.name,
+        instagram_handle=request.instagram_handle,
+        email=request.email,
+        phone=request.phone,
+        company=request.company,
+        status=request.status or "new",
+        follow_up_date=request.follow_up_date,
+        source_post_id=request.source_post_id,
+        source=request.source,
+        notes=request.notes,
+    )
+    
+    db.add(lead)
+    await db.commit()
+    await db.refresh(lead)
+    
+    return {
+        "id": lead.id,
+        "name": lead.name,
+        "status": lead.status,
+        "created_at": lead.created_at.isoformat() if lead.created_at else None,
+    }
+
+
+@router.get("/leads/{lead_id}")
+async def get_lead(
+    lead_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a specific lead."""
+    result = await db.execute(select(Lead).where(Lead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    return {
+        "id": lead.id,
+        "name": lead.name,
+        "instagram_handle": lead.instagram_handle,
+        "email": lead.email,
+        "phone": lead.phone,
+        "company": lead.company,
+        "status": lead.status,
+        "follow_up_date": lead.follow_up_date.isoformat() if lead.follow_up_date else None,
+        "source_post_id": lead.source_post_id,
+        "source": lead.source,
+        "notes": lead.notes,
+        "created_at": lead.created_at.isoformat() if lead.created_at else None,
+        "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
+    }
+
+
+@router.put("/leads/{lead_id}")
+async def update_lead(
+    lead_id: int,
+    request: UpdateLeadRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update a lead."""
+    result = await db.execute(select(Lead).where(Lead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    # Update fields if provided
+    if request.name is not None:
+        lead.name = request.name
+    if request.instagram_handle is not None:
+        lead.instagram_handle = request.instagram_handle
+    if request.email is not None:
+        lead.email = request.email
+    if request.phone is not None:
+        lead.phone = request.phone
+    if request.company is not None:
+        lead.company = request.company
+    if request.status is not None:
+        lead.status = request.status
+    if request.follow_up_date is not None:
+        lead.follow_up_date = request.follow_up_date
+    if request.source_post_id is not None:
+        lead.source_post_id = request.source_post_id
+    if request.source is not None:
+        lead.source = request.source
+    if request.notes is not None:
+        lead.notes = request.notes
+    
+    await db.commit()
+    await db.refresh(lead)
+    
+    return {
+        "id": lead.id,
+        "name": lead.name,
+        "status": lead.status,
+        "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
+    }
+
+
+@router.delete("/leads/{lead_id}")
+async def delete_lead(
+    lead_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a lead."""
+    result = await db.execute(select(Lead).where(Lead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    await db.delete(lead)
+    await db.commit()
+    
+    return {"status": "deleted", "id": lead_id}
+
+
+@router.patch("/leads/{lead_id}/status")
+async def update_lead_status(
+    lead_id: int,
+    status: str,
+    follow_up_date: Optional[datetime] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Quick update just the status of a lead."""
+    result = await db.execute(select(Lead).where(Lead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    lead.status = status
+    if follow_up_date:
+        lead.follow_up_date = follow_up_date
+    
+    await db.commit()
+    await db.refresh(lead)
+    
+    return {
+        "id": lead.id,
+        "status": lead.status,
+        "follow_up_date": lead.follow_up_date.isoformat() if lead.follow_up_date else None,
     }

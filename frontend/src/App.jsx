@@ -51,6 +51,13 @@ function App() {
   const [scheduledPosts, setScheduledPosts] = useState([])
   const [savingSettings, setSavingSettings] = useState(false)
 
+  // Leads state
+  const [leads, setLeads] = useState([])
+  const [leadStatuses, setLeadStatuses] = useState([])
+  const [showLeadForm, setShowLeadForm] = useState(false)
+  const [editingLead, setEditingLead] = useState(null)
+  const [leadFilter, setLeadFilter] = useState('')
+
   useEffect(() => {
     fetchContentTemplates()
     fetchColorThemes()
@@ -58,6 +65,8 @@ function App() {
     fetchLayouts()
     fetchPosts()
     fetchAutoPostSettings()
+    fetchLeads()
+    fetchLeadStatuses()
     fetchScheduledPosts()
   }, [])
 
@@ -128,6 +137,84 @@ function App() {
       setScheduledPosts(data)
     } catch (err) {
       console.error('Failed to fetch scheduled posts:', err)
+    }
+  }
+
+  const fetchLeads = async (statusFilter = '') => {
+    try {
+      const url = statusFilter 
+        ? `${API_BASE}/leads?status=${statusFilter}`
+        : `${API_BASE}/leads`
+      const res = await fetch(url)
+      const data = await res.json()
+      setLeads(data)
+    } catch (err) {
+      console.error('Failed to fetch leads:', err)
+    }
+  }
+
+  const fetchLeadStatuses = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/leads/statuses`)
+      const data = await res.json()
+      setLeadStatuses(data)
+    } catch (err) {
+      console.error('Failed to fetch lead statuses:', err)
+    }
+  }
+
+  const createLead = async (leadData) => {
+    try {
+      const res = await fetch(`${API_BASE}/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(leadData),
+      })
+      const data = await res.json()
+      fetchLeads(leadFilter)
+      return data
+    } catch (err) {
+      console.error('Failed to create lead:', err)
+    }
+  }
+
+  const updateLead = async (leadId, leadData) => {
+    try {
+      const res = await fetch(`${API_BASE}/leads/${leadId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(leadData),
+      })
+      const data = await res.json()
+      fetchLeads(leadFilter)
+      return data
+    } catch (err) {
+      console.error('Failed to update lead:', err)
+    }
+  }
+
+  const updateLeadStatus = async (leadId, status, followUpDate = null) => {
+    try {
+      let url = `${API_BASE}/leads/${leadId}/status?status=${status}`
+      if (followUpDate) {
+        url += `&follow_up_date=${followUpDate}`
+      }
+      const res = await fetch(url, { method: 'PATCH' })
+      const data = await res.json()
+      fetchLeads(leadFilter)
+      return data
+    } catch (err) {
+      console.error('Failed to update lead status:', err)
+    }
+  }
+
+  const deleteLead = async (leadId) => {
+    if (!confirm('Are you sure you want to delete this lead?')) return
+    try {
+      await fetch(`${API_BASE}/leads/${leadId}`, { method: 'DELETE' })
+      fetchLeads(leadFilter)
+    } catch (err) {
+      console.error('Failed to delete lead:', err)
     }
   }
 
@@ -299,6 +386,12 @@ function App() {
               onClick={() => setCurrentPage('history')}
             >
               History
+            </button>
+            <button
+              className={`nav-btn ${currentPage === 'leads' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('leads')}
+            >
+              Leads
             </button>
             <button
               className={`nav-btn ${currentPage === 'settings' ? 'active' : ''}`}
@@ -585,6 +678,211 @@ function App() {
                 ))}
               </div>
             )}
+          </section>
+        )}
+
+        {currentPage === 'leads' && (
+          <section className="leads-section animate-fade-in">
+            <div className="leads-header">
+              <h2 className="section-title">Lead Tracker</h2>
+              <button 
+                className="btn btn-primary"
+                onClick={() => { setEditingLead(null); setShowLeadForm(true); }}
+              >
+                + Add Lead
+              </button>
+            </div>
+
+            {/* Status Filter */}
+            <div className="lead-filters">
+              <button 
+                className={`filter-btn ${leadFilter === '' ? 'active' : ''}`}
+                onClick={() => { setLeadFilter(''); fetchLeads(''); }}
+              >
+                All
+              </button>
+              {leadStatuses.map(status => (
+                <button
+                  key={status.id}
+                  className={`filter-btn ${leadFilter === status.id ? 'active' : ''}`}
+                  style={{ borderColor: status.color }}
+                  onClick={() => { setLeadFilter(status.id); fetchLeads(status.id); }}
+                >
+                  {status.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Lead Form Modal */}
+            {showLeadForm && (
+              <div className="modal-overlay" onClick={() => setShowLeadForm(false)}>
+                <div className="modal-content lead-form" onClick={e => e.stopPropagation()}>
+                  <h3>{editingLead ? 'Edit Lead' : 'Add New Lead'}</h3>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault()
+                    const formData = new FormData(e.target)
+                    const leadData = {
+                      name: formData.get('name'),
+                      instagram_handle: formData.get('instagram_handle') || null,
+                      email: formData.get('email') || null,
+                      phone: formData.get('phone') || null,
+                      company: formData.get('company') || null,
+                      status: formData.get('status') || 'new',
+                      source: formData.get('source') || null,
+                      notes: formData.get('notes') || null,
+                      follow_up_date: formData.get('follow_up_date') || null,
+                    }
+                    if (editingLead) {
+                      await updateLead(editingLead.id, leadData)
+                    } else {
+                      await createLead(leadData)
+                    }
+                    setShowLeadForm(false)
+                    setEditingLead(null)
+                  }}>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Name *</label>
+                        <input name="name" required defaultValue={editingLead?.name || ''} />
+                      </div>
+                      <div className="form-group">
+                        <label>Instagram</label>
+                        <input name="instagram_handle" placeholder="@username" defaultValue={editingLead?.instagram_handle || ''} />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Email</label>
+                        <input name="email" type="email" defaultValue={editingLead?.email || ''} />
+                      </div>
+                      <div className="form-group">
+                        <label>Phone</label>
+                        <input name="phone" defaultValue={editingLead?.phone || ''} />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Company</label>
+                        <input name="company" defaultValue={editingLead?.company || ''} />
+                      </div>
+                      <div className="form-group">
+                        <label>Source</label>
+                        <input name="source" placeholder="Instagram DM, Comment, etc." defaultValue={editingLead?.source || ''} />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Status</label>
+                        <select name="status" defaultValue={editingLead?.status || 'new'}>
+                          {leadStatuses.map(s => (
+                            <option key={s.id} value={s.id}>{s.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Follow-up Date</label>
+                        <input name="follow_up_date" type="datetime-local" defaultValue={editingLead?.follow_up_date?.slice(0, 16) || ''} />
+                      </div>
+                    </div>
+                    <div className="form-group full-width">
+                      <label>Notes</label>
+                      <textarea name="notes" rows="3" defaultValue={editingLead?.notes || ''}></textarea>
+                    </div>
+                    <div className="form-actions">
+                      <button type="button" className="btn btn-secondary" onClick={() => { setShowLeadForm(false); setEditingLead(null); }}>
+                        Cancel
+                      </button>
+                      <button type="submit" className="btn btn-primary">
+                        {editingLead ? 'Save Changes' : 'Add Lead'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Leads Table */}
+            <div className="leads-table-container">
+              <table className="leads-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Instagram</th>
+                    <th>Contact</th>
+                    <th>Status</th>
+                    <th>Follow-up</th>
+                    <th>Notes</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leads.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" className="empty-state">No leads yet. Add your first lead!</td>
+                    </tr>
+                  ) : (
+                    leads.map(lead => {
+                      const statusInfo = leadStatuses.find(s => s.id === lead.status) || { label: lead.status, color: '#6c757d' }
+                      return (
+                        <tr key={lead.id}>
+                          <td>
+                            <strong>{lead.name}</strong>
+                            {lead.company && <div className="lead-company">{lead.company}</div>}
+                          </td>
+                          <td>
+                            {lead.instagram_handle && (
+                              <a href={`https://instagram.com/${lead.instagram_handle.replace('@', '')}`} target="_blank" rel="noopener noreferrer">
+                                {lead.instagram_handle}
+                              </a>
+                            )}
+                          </td>
+                          <td>
+                            {lead.email && <div className="lead-email">{lead.email}</div>}
+                            {lead.phone && <div className="lead-phone">{lead.phone}</div>}
+                          </td>
+                          <td>
+                            <select 
+                              className="status-select"
+                              value={lead.status}
+                              style={{ borderColor: statusInfo.color, color: statusInfo.color }}
+                              onChange={(e) => updateLeadStatus(lead.id, e.target.value)}
+                            >
+                              {leadStatuses.map(s => (
+                                <option key={s.id} value={s.id}>{s.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            {lead.follow_up_date ? new Date(lead.follow_up_date).toLocaleDateString() : '-'}
+                          </td>
+                          <td className="lead-notes">
+                            {lead.notes ? (lead.notes.length > 50 ? lead.notes.slice(0, 50) + '...' : lead.notes) : '-'}
+                          </td>
+                          <td>
+                            <div className="lead-actions">
+                              <button 
+                                className="btn-icon" 
+                                title="Edit"
+                                onClick={() => { setEditingLead(lead); setShowLeadForm(true); }}
+                              >
+                                ✏️
+                              </button>
+                              <button 
+                                className="btn-icon" 
+                                title="Delete"
+                                onClick={() => deleteLead(lead.id)}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
