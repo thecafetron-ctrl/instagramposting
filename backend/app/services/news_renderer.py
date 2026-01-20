@@ -3,7 +3,7 @@ News Post Renderer - Creates single-image news posts.
 - Square format (1080x1080)
 - Top 58%: Unsplash image related to the news
 - Bottom 42%: MASSIVE ALL CAPS headline
-- STRUCTURE branding
+- Logo + STRUCTURE branding top left only
 """
 
 import os
@@ -34,7 +34,6 @@ DARK_BG = (12, 12, 18)
 # Font paths
 ASSETS_DIR = Path(__file__).parent.parent.parent / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts" / "Montserrat"
-LOGO_PATH = ASSETS_DIR / "logo.png"
 
 # Output directory
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "generated_images"
@@ -49,7 +48,6 @@ async def fetch_unsplash_image(query: str) -> Image.Image | None:
         print("No Unsplash access key configured")
         return None
     
-    # Better search terms
     keywords_map = {
         "supply chain": "warehouse logistics shipping",
         "logistics": "warehouse shipping cargo",
@@ -67,6 +65,8 @@ async def fetch_unsplash_image(query: str) -> Image.Image | None:
         "delivery": "delivery packages",
         "trade": "international trade",
         "tariff": "international shipping",
+        "ocean": "cargo ship ocean",
+        "grain": "grain agriculture export",
     }
     
     query_lower = query.lower()
@@ -126,14 +126,12 @@ class NewsPostRenderer:
         self._load_logo()
     
     def _load_fonts(self):
-        """Load fonts - ACTUALLY EXTRABOLD and HUGE."""
+        """Load fonts - EXTRABOLD and HUGE."""
         try:
             # Top left brand
-            self.font_brand_top = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 42)
-            # Category
-            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 32)
-            # STRUCTURE watermark - BIG
-            self.font_structure = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 48)
+            self.font_brand = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 38)
+            # Category - centered
+            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 28)
             # Headlines - MASSIVE EXTRABOLD
             self.font_headline_huge = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 120)
             self.font_headline_xl = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 100)
@@ -143,10 +141,8 @@ class NewsPostRenderer:
             print("✓ Loaded ExtraBold fonts successfully")
         except Exception as e:
             print(f"Font loading error: {e}")
-            # Fallback
-            self.font_brand_top = ImageFont.load_default()
+            self.font_brand = ImageFont.load_default()
             self.font_category = ImageFont.load_default()
-            self.font_structure = ImageFont.load_default()
             self.font_headline_huge = ImageFont.load_default()
             self.font_headline_xl = ImageFont.load_default()
             self.font_headline_lg = ImageFont.load_default()
@@ -154,21 +150,19 @@ class NewsPostRenderer:
             self.font_headline_sm = ImageFont.load_default()
     
     def _load_logo(self):
-        """Load logo."""
+        """Load SVG logo."""
         self.logo = None
         try:
-            logo_path = ASSETS_DIR / "logo.png"
-            if logo_path.exists():
-                self.logo = Image.open(logo_path).convert("RGBA")
+            import cairosvg
+            logo_svg = ASSETS_DIR / "logo.svg"
+            if logo_svg.exists():
+                png_data = cairosvg.svg2png(url=str(logo_svg), output_width=150)
+                self.logo = Image.open(BytesIO(png_data)).convert("RGBA")
+                print("✓ Loaded logo from SVG")
             else:
-                try:
-                    import cairosvg
-                    logo_svg = ASSETS_DIR / "logo.svg"
-                    if logo_svg.exists():
-                        png_data = cairosvg.svg2png(url=str(logo_svg), output_width=200)
-                        self.logo = Image.open(BytesIO(png_data)).convert("RGBA")
-                except:
-                    pass
+                logo_path = ASSETS_DIR / "logo.png"
+                if logo_path.exists():
+                    self.logo = Image.open(logo_path).convert("RGBA")
         except Exception as e:
             print(f"Logo loading error: {e}")
     
@@ -194,10 +188,9 @@ class NewsPostRenderer:
         
         draw = ImageDraw.Draw(img)
         
-        # Draw elements
-        self._draw_top_brand(draw)
+        # Draw elements - ONLY logo + STRUCTURE top left, category centered, headline
+        self._draw_top_brand(img, draw)
         self._draw_category(draw, category, image_height)
-        self._draw_structure_watermark(img, draw, image_height)
         self._draw_headline_massive(draw, headline, image_height, text_height, accent_words)
         
         # Save
@@ -238,27 +231,35 @@ class NewsPostRenderer:
                 new_b = int(b * (1 - progress) + DARK_BG[2] * progress)
                 img.putpixel((x, y), (new_r, new_g, new_b))
     
-    def _draw_top_brand(self, draw: ImageDraw.Draw):
-        """STRUCTURE NEWS top left - BIG."""
-        x, y = 35, 30
+    def _draw_top_brand(self, img: Image.Image, draw: ImageDraw.Draw):
+        """Logo + STRUCTURE on top left ONLY (no NEWS)."""
+        x, y = 35, 35
         
-        # STRUCTURE
-        for offset in range(4, 0, -1):
-            draw.text((x + offset, y + offset), "STRUCTURE", font=self.font_brand_top, fill=BLACK)
-        draw.text((x, y), "STRUCTURE", font=self.font_brand_top, fill=WHITE)
+        # Draw logo
+        if self.logo:
+            logo_size = 55
+            logo_resized = self.logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
+            img.paste(logo_resized, (x, y), logo_resized)
+            text_x = x + logo_size + 15
+        else:
+            text_x = x
         
-        # NEWS
-        y2 = y + 50
+        # STRUCTURE text next to logo - vertically centered
+        text_y = y + 10
+        # Shadow
         for offset in range(4, 0, -1):
-            draw.text((x + offset, y2 + offset), "NEWS", font=self.font_brand_top, fill=BLACK)
-        draw.text((x, y2), "NEWS", font=self.font_brand_top, fill=WHITE)
+            draw.text((text_x + offset, text_y + offset), "STRUCTURE", font=self.font_brand, fill=BLACK)
+        draw.text((text_x, text_y), "STRUCTURE", font=self.font_brand, fill=WHITE)
     
     def _draw_category(self, draw: ImageDraw.Draw, category: str, image_height: int):
-        """Category with underline - BIGGER."""
-        y = image_height - 60
+        """Category with underline - PROPERLY CENTERED."""
+        y = image_height - 55
         
+        # Get text dimensions for PERFECT centering
         bbox = draw.textbbox((0, 0), category, font=self.font_category)
         text_width = bbox[2] - bbox[0]
+        
+        # Center X position
         x = (self.width - text_width) // 2
         
         # Shadow
@@ -266,39 +267,11 @@ class NewsPostRenderer:
             draw.text((x + offset, y + offset), category, font=self.font_category, fill=BLACK)
         draw.text((x, y), category, font=self.font_category, fill=WHITE)
         
-        # Underline
-        line_y = y + 42
-        draw.line([(x - 40, line_y), (x + text_width + 40, line_y)], fill=WHITE, width=4)
-    
-    def _draw_structure_watermark(self, img: Image.Image, draw: ImageDraw.Draw, image_height: int):
-        """STRUCTURE + logo watermark - MUCH BIGGER."""
-        y = image_height + 25
-        
-        brand_text = "STRUCTURE"
-        bbox = draw.textbbox((0, 0), brand_text, font=self.font_structure)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        
-        if self.logo:
-            logo_size = 60
-            logo_resized = self.logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-            total_width = logo_size + 20 + text_width
-            start_x = (self.width - total_width) // 2
-            
-            # Logo
-            img.paste(logo_resized, (start_x, y), logo_resized)
-            
-            # Text with shadow
-            text_x = start_x + logo_size + 20
-            text_y = y + (logo_size - text_height) // 2
-            for offset in range(3, 0, -1):
-                draw.text((text_x + offset, text_y + offset), brand_text, font=self.font_structure, fill=BLACK)
-            draw.text((text_x, text_y), brand_text, font=self.font_structure, fill=WHITE)
-        else:
-            x = (self.width - text_width) // 2
-            for offset in range(3, 0, -1):
-                draw.text((x + offset, y + offset), brand_text, font=self.font_structure, fill=BLACK)
-            draw.text((x, y), brand_text, font=self.font_structure, fill=WHITE)
+        # Centered underline
+        line_y = y + 38
+        line_start = x - 30
+        line_end = x + text_width + 30
+        draw.line([(line_start, line_y), (line_end, line_y)], fill=WHITE, width=3)
     
     def _draw_headline_massive(self, draw: ImageDraw.Draw, headline: str, image_height: int, text_height: int, accent_words: list[str] = None):
         """MASSIVE headline that FILLS the text area."""
@@ -308,8 +281,8 @@ class NewsPostRenderer:
         headline = headline.upper()
         accent_words = [w.upper() for w in accent_words]
         
-        # Text area starts after STRUCTURE watermark
-        text_start_y = image_height + 100
+        # Text area - starts right after image, more room now without watermark
+        text_start_y = image_height + 50
         available_height = self.height - text_start_y - 40
         max_width = self.width - 80
         
@@ -410,10 +383,10 @@ class NewsPostRenderer:
         important = [
             "rising", "falling", "breaking", "crisis", "surge", "record",
             "new", "first", "major", "global", "billion", "million",
-            "supply", "chain", "shipping", "freight", "logistics",
+            "supply", "chain", "shipping", "freight", "logistics", "ocean",
             "ai", "automation", "technology", "disruption", "shortage",
             "prices", "costs", "inflation", "growth", "decline", "cutting",
-            "game", "changing", "ecommerce", "success"
+            "game", "changing", "ecommerce", "success", "grain", "exports"
         ]
         
         accent = []
