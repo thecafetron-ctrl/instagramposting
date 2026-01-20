@@ -22,9 +22,9 @@ settings = get_settings()
 WIDTH = 1080
 HEIGHT = 1080
 
-# Layout proportions - more space for text
-IMAGE_HEIGHT_RATIO = 0.58  # 58% for image
-TEXT_HEIGHT_RATIO = 0.42   # 42% for text (BIGGER)
+# Layout proportions - MORE space for text
+IMAGE_HEIGHT_RATIO = 0.52  # 52% for image
+TEXT_HEIGHT_RATIO = 0.48   # 48% for text (MUCH BIGGER)
 
 # Colors
 WHITE = (255, 255, 255)
@@ -149,18 +149,20 @@ class NewsPostRenderer:
     def _load_fonts(self):
         """Load Montserrat fonts - MASSIVE sizes."""
         try:
-            # Brand font
-            self.font_brand = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 28)
-            # Category font
-            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-SemiBold.ttf"), 20)
+            # Brand font - BIGGER
+            self.font_brand = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 36)
+            self.font_brand_large = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 42)
+            # Category font - BIGGER
+            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-SemiBold.ttf"), 28)
             # Headline fonts - MASSIVE and ULTRA BOLD
-            self.font_headline_xl = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 72)
-            self.font_headline_lg = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 62)
-            self.font_headline_md = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 52)
-            self.font_headline_sm = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 44)
+            self.font_headline_xl = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 88)
+            self.font_headline_lg = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 76)
+            self.font_headline_md = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 64)
+            self.font_headline_sm = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 52)
         except Exception as e:
             print(f"Font loading error: {e}")
             self.font_brand = ImageFont.load_default()
+            self.font_brand_large = ImageFont.load_default()
             self.font_category = ImageFont.load_default()
             self.font_headline_xl = ImageFont.load_default()
             self.font_headline_lg = ImageFont.load_default()
@@ -275,63 +277,70 @@ class NewsPostRenderer:
                 img.putpixel((x, y), (new_r, new_g, new_b))
     
     def _draw_brand(self, draw: ImageDraw.Draw):
-        """Draw STRUCTURE NEWS at top left."""
+        """Draw STRUCTURE NEWS at top left - BIGGER."""
         x, y = 40, 35
         
-        # Shadow
+        # Strong multi-layer shadow
+        draw.text((x+3, y+3), "STRUCTURE", font=self.font_brand, fill=(0, 0, 0))
         draw.text((x+2, y+2), "STRUCTURE", font=self.font_brand, fill=(0, 0, 0))
         draw.text((x, y), "STRUCTURE", font=self.font_brand, fill=WHITE)
         
-        draw.text((x+2, y+32), "NEWS", font=self.font_brand, fill=(0, 0, 0))
-        draw.text((x, y+30), "NEWS", font=self.font_brand, fill=WHITE)
+        draw.text((x+3, y+43), "NEWS", font=self.font_brand, fill=(0, 0, 0))
+        draw.text((x+2, y+42), "NEWS", font=self.font_brand, fill=(0, 0, 0))
+        draw.text((x, y+40), "NEWS", font=self.font_brand, fill=WHITE)
     
     def _draw_category(self, draw: ImageDraw.Draw, category: str, image_height: int):
-        """Draw category with underline."""
-        y = image_height - 50
+        """Draw category with underline - BIGGER."""
+        y = image_height - 55
         
         bbox = draw.textbbox((0, 0), category, font=self.font_category)
         text_width = bbox[2] - bbox[0]
         x = (self.width - text_width) // 2
         
-        # Shadow
-        draw.text((x+1, y+1), category, font=self.font_category, fill=(0, 0, 0))
+        # Strong shadow for visibility
+        draw.text((x+2, y+2), category, font=self.font_category, fill=(0, 0, 0))
+        draw.text((x+1, y+1), category, font=self.font_category, fill=(20, 20, 20))
         draw.text((x, y), category, font=self.font_category, fill=WHITE)
         
-        # Underline
-        line_y = y + 28
-        draw.line([(x - 20, line_y), (x + text_width + 20, line_y)], fill=WHITE, width=2)
+        # Thicker underline
+        line_y = y + 35
+        draw.line([(x - 30, line_y), (x + text_width + 30, line_y)], fill=WHITE, width=3)
     
     def _draw_structure_branding(self, img: Image.Image, draw: ImageDraw.Draw, image_height: int):
-        """Draw STRUCTURE text and logo above the black section."""
+        """Draw STRUCTURE text and logo above the black section - MUCH BIGGER."""
         # Position just above the text area
-        y = image_height + 15
+        y = image_height + 20
+        
+        brand_text = "STRUCTURE"
         
         # Draw logo if available
         if self.logo:
-            logo_size = 35
+            logo_size = 50  # BIGGER logo
             logo_resized = self.logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
             
             # Calculate position (centered with text)
-            brand_text = "STRUCTURE"
-            bbox = draw.textbbox((0, 0), brand_text, font=self.font_brand)
+            bbox = draw.textbbox((0, 0), brand_text, font=self.font_brand_large)
             text_width = bbox[2] - bbox[0]
-            total_width = logo_size + 10 + text_width
+            total_width = logo_size + 15 + text_width
             
             start_x = (self.width - total_width) // 2
             
             # Paste logo
             img.paste(logo_resized, (start_x, y), logo_resized)
             
-            # Draw STRUCTURE text
-            text_x = start_x + logo_size + 10
-            draw.text((text_x, y + 5), brand_text, font=self.font_brand, fill=(150, 150, 160))
+            # Draw STRUCTURE text - WHITE and BOLD
+            text_x = start_x + logo_size + 15
+            # Shadow
+            draw.text((text_x + 2, y + 8), brand_text, font=self.font_brand_large, fill=(0, 0, 0))
+            draw.text((text_x, y + 6), brand_text, font=self.font_brand_large, fill=WHITE)
         else:
-            # Just draw text centered
-            brand_text = "STRUCTURE"
-            bbox = draw.textbbox((0, 0), brand_text, font=self.font_brand)
+            # Just draw text centered - WHITE and BOLD
+            bbox = draw.textbbox((0, 0), brand_text, font=self.font_brand_large)
             text_width = bbox[2] - bbox[0]
             x = (self.width - text_width) // 2
-            draw.text((x, y), brand_text, font=self.font_brand, fill=(150, 150, 160))
+            # Shadow
+            draw.text((x + 2, y + 2), brand_text, font=self.font_brand_large, fill=(0, 0, 0))
+            draw.text((x, y), brand_text, font=self.font_brand_large, fill=WHITE)
     
     def _draw_headline(self, draw: ImageDraw.Draw, headline: str, image_height: int, text_height: int, accent_words: list[str] = None):
         """Draw MASSIVE headline in bottom section."""
@@ -343,20 +352,20 @@ class NewsPostRenderer:
         accent_words = [w.upper() for w in accent_words]
         
         # Available space for text (leave room for branding at top)
-        text_start_y = image_height + 60
-        available_height = text_height - 80
+        text_start_y = image_height + 85  # More space for bigger branding
+        available_height = text_height - 100
         
-        max_width = self.width - 80
+        max_width = self.width - 100  # More padding
         
-        # Try fonts from largest to smallest
+        # Try fonts from largest to smallest - start with MASSIVE
         fonts = [self.font_headline_xl, self.font_headline_lg, self.font_headline_md, self.font_headline_sm]
         
         for font in fonts:
             lines = self._wrap_text(headline, font, max_width, draw)
-            line_height = font.size + 12
+            line_height = font.size + 18  # More line spacing
             total_height = len(lines) * line_height
             
-            if total_height <= available_height and len(lines) <= 5:
+            if total_height <= available_height and len(lines) <= 4:
                 break
         
         # Center vertically in available space
@@ -391,7 +400,7 @@ class NewsPostRenderer:
         return lines
     
     def _draw_headline_line(self, draw: ImageDraw.Draw, line: str, y: int, font: ImageFont.FreeTypeFont, accent_words: list[str]):
-        """Draw headline line with accent colors."""
+        """Draw headline line with accent colors - ULTRA VISIBLE."""
         words = line.split()
         
         # Calculate widths
@@ -415,8 +424,10 @@ class NewsPostRenderer:
             is_accent = any(a == word_clean or a in word_clean for a in accent_words)
             color = ACCENT_CYAN if is_accent else WHITE
             
-            # Strong shadow for readability
-            draw.text((x + 3, y + 3), word, font=font, fill=(0, 0, 0))
+            # STRONG multi-layer shadow for maximum readability
+            draw.text((x + 5, y + 5), word, font=font, fill=(0, 0, 0))
+            draw.text((x + 4, y + 4), word, font=font, fill=(0, 0, 0))
+            draw.text((x + 3, y + 3), word, font=font, fill=(10, 10, 10))
             draw.text((x + 2, y + 2), word, font=font, fill=(20, 20, 20))
             draw.text((x, y), word, font=font, fill=color)
             
