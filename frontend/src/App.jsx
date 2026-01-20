@@ -65,6 +65,11 @@ function App() {
   const [customHeadline, setCustomHeadline] = useState('')
   const [newsCategory, setNewsCategory] = useState('SUPPLY CHAIN')
   const [generatedNewsPost, setGeneratedNewsPost] = useState(null)
+  
+  // News post options
+  const [newsAccentColor, setNewsAccentColor] = useState('cyan')
+  const [newsTimeRange, setNewsTimeRange] = useState('1d')
+  const [newsAutoSelect, setNewsAutoSelect] = useState(false)
 
   useEffect(() => {
     fetchContentTemplates()
@@ -325,9 +330,9 @@ function App() {
   }
 
   // News functions
-  const fetchNewsArticles = async () => {
+  const fetchNewsArticles = async (timeRange = newsTimeRange) => {
     try {
-      const res = await fetch(`${API_BASE}/news/latest?count=10`)
+      const res = await fetch(`${API_BASE}/news/latest?count=10&time_range=${timeRange}`)
       const data = await res.json()
       if (data.news) {
         setNewsArticles(data.news)
@@ -345,14 +350,16 @@ function App() {
     try {
       const body = {
         category: newsCategory,
+        accent_color: newsAccentColor,
+        time_range: newsTimeRange,
+        auto_select: newsAutoSelect,
       }
       
-      // Use custom headline or selected news article
+      // Use custom headline or selected news article (if not auto-selecting)
       if (customHeadline) {
         body.custom_headline = customHeadline
-      } else if (newsArticles.length > 0) {
-        body.custom_headline = newsArticles[selectedNewsIndex]?.title
-        body.category = newsArticles[selectedNewsIndex]?.category || newsCategory
+      } else if (!newsAutoSelect && newsArticles.length > 0) {
+        body.selected_news_index = selectedNewsIndex
       }
 
       const res = await fetch(`${API_BASE}/news/generate`, {
@@ -651,9 +658,75 @@ function App() {
               <div className="news-section">
                 <h3 className="subsection-title">📰 News Post Settings</h3>
                 
+                {/* Accent Color Selector */}
+                <div className="selector-group">
+                  <label className="form-label">Highlight Color</label>
+                  <div className="accent-color-buttons">
+                    {[
+                      { id: 'cyan', color: '#00c8ff', name: 'Cyan' },
+                      { id: 'blue', color: '#3b82f6', name: 'Blue' },
+                      { id: 'green', color: '#22c55e', name: 'Green' },
+                      { id: 'orange', color: '#f97316', name: 'Orange' },
+                      { id: 'red', color: '#ef4444', name: 'Red' },
+                      { id: 'yellow', color: '#eab308', name: 'Yellow' },
+                      { id: 'pink', color: '#ec4899', name: 'Pink' },
+                      { id: 'purple', color: '#a855f7', name: 'Purple' },
+                    ].map(c => (
+                      <button
+                        key={c.id}
+                        className={`accent-color-btn ${newsAccentColor === c.id ? 'active' : ''}`}
+                        onClick={() => setNewsAccentColor(c.id)}
+                        style={{ '--accent-color': c.color }}
+                        title={c.name}
+                      >
+                        <span className="color-dot" style={{ background: c.color }}></span>
+                        <span className="color-name">{c.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Time Range Selector */}
+                <div className="selector-group">
+                  <label className="form-label">News Age</label>
+                  <div className="time-range-buttons">
+                    {[
+                      { id: 'today', name: 'Today' },
+                      { id: '1d', name: '24h' },
+                      { id: '3d', name: '3 Days' },
+                      { id: '1w', name: '1 Week' },
+                      { id: '2w', name: '2 Weeks' },
+                      { id: '4w', name: '1 Month' },
+                      { id: 'anytime', name: 'Anytime' },
+                    ].map(t => (
+                      <button
+                        key={t.id}
+                        className={`time-btn ${newsTimeRange === t.id ? 'active' : ''}`}
+                        onClick={() => { setNewsTimeRange(t.id); fetchNewsArticles(t.id); }}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Auto-Select Toggle */}
+                <div className="selector-group">
+                  <label className="toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={newsAutoSelect}
+                      onChange={(e) => setNewsAutoSelect(e.target.checked)}
+                    />
+                    <span className="toggle-text">
+                      <strong>AI Auto-Select</strong> - Let AI pick the most viral topic
+                    </span>
+                  </label>
+                </div>
+                
                 {/* News Category */}
                 <div className="selector-group">
-                  <label className="form-label">Category</label>
+                  <label className="form-label">Category Label</label>
                   <div className="category-buttons">
                     {['SUPPLY CHAIN', 'LOGISTICS', 'FREIGHT', 'SHIPPING', 'TECHNOLOGY', 'BREAKING'].map(cat => (
                       <button
@@ -668,8 +741,9 @@ function App() {
                 </div>
 
                 {/* Custom Headline or Select from News */}
+                {!newsAutoSelect && (
                 <div className="selector-group">
-                  <label className="form-label">Headline</label>
+                  <label className="form-label">Custom Headline (optional)</label>
                   <input
                     type="text"
                     className="form-input"
@@ -678,12 +752,14 @@ function App() {
                     onChange={(e) => setCustomHeadline(e.target.value)}
                   />
                 </div>
+                )}
 
                 {/* Latest News Articles */}
+                {!newsAutoSelect && (
                 <div className="selector-group">
                   <div className="news-header">
                     <label className="form-label">Or Select from Latest News</label>
-                    <button className="btn btn-sm" onClick={fetchNewsArticles}>
+                    <button className="btn btn-sm" onClick={() => fetchNewsArticles()}>
                       🔄 Refresh
                     </button>
                   </div>
@@ -708,12 +784,13 @@ function App() {
                     )}
                   </div>
                 </div>
+                )}
               </div>
 
               <button
                 className="btn btn-primary btn-lg generate-btn"
                 onClick={generateNewsPost}
-                disabled={loading || (!customHeadline && newsArticles.length === 0)}
+                disabled={loading || (!newsAutoSelect && !customHeadline && newsArticles.length === 0)}
               >
                 {loading ? (
                   <>
