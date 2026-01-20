@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session_maker, init_db
 from app.models import ScheduledPost, AutoPostSettings, Post
-from app.services.instagram_poster import post_carousel_to_instagram
+from app.services.instagram_poster import post_carousel_to_instagram, post_single_image_to_instagram
 from app.services.content_generator import generate_carousel_content
 from app.services.image_renderer import get_renderer
+from app.services.news_service import search_news_serpapi, generate_hook_headline, generate_ai_news_caption, select_most_viral_topic
+from app.services.news_renderer import render_news_post
 from app.design_templates import list_color_themes, list_textures, list_layouts
 from app.templates import get_all_templates
 from app.config import get_settings
@@ -100,40 +102,58 @@ async def process_scheduled_post(db: AsyncSession, scheduled: ScheduledPost, aut
             
             scheduled.post_id = post.id
         
-        # Collect image paths (slides 1-4)
-        image_paths = [
-            post.slide_1_image,
-            post.slide_2_image,
-            post.slide_3_image,
-            post.slide_4_image
-        ]
+        # Check post type
+        is_news = post.metadata_json and post.metadata_json.get("post_type") == "news"
         
-        # Add extra slides from metadata (slides 5+)
-        if post.metadata_json and "extra_images" in post.metadata_json:
-            extra_images = post.metadata_json["extra_images"]
-            slide_count = post.metadata_json.get("slide_count", 4)
-            for i in range(5, slide_count + 1):
-                img_key = f"slide_{i}_image"
-                if img_key in extra_images and extra_images[img_key]:
-                    image_paths.append(extra_images[img_key])
-        
-        image_paths = [p for p in image_paths if p]
-        
-        if len(image_paths) < 2:
-            scheduled.status = "failed"
-            scheduled.error_message = "Not enough images"
-            await db.commit()
-            return
-        
-        # Post to Instagram
-        print(f"[Scheduler] Posting to Instagram...")
-        result = await post_carousel_to_instagram(
-            image_paths=image_paths,
-            caption=post.caption,
-            hashtags=post.hashtags,
-            base_url=BASE_URL,
-            access_token=settings.instagram_access_token
-        )
+        if is_news:
+            # News post - single image
+            if not post.slide_1_image:
+                scheduled.status = "failed"
+                scheduled.error_message = "No image for news post"
+                await db.commit()
+                return
+            
+            image_path = f"backend/generated_images/{post.slide_1_image}"
+            
+            print(f"[Scheduler] Posting news to Instagram...")
+            result = await post_single_image_to_instagram(
+                image_path=image_path,
+                caption=post.caption,
+                hashtags=post.hashtags,
+                base_url=BASE_URL,
+                access_token=settings.instagram_access_token
+            )
+        else:
+            # Carousel post - collect all image paths
+            image_paths = []
+            for img in [post.slide_1_image, post.slide_2_image, post.slide_3_image, post.slide_4_image]:
+                if img:
+                    image_paths.append(f"backend/generated_images/{img}")
+            
+            # Add extra slides from metadata (slides 5+)
+            if post.metadata_json and "extra_images" in post.metadata_json:
+                extra_images = post.metadata_json["extra_images"]
+                slide_count = post.metadata_json.get("slide_count", 4)
+                for i in range(5, slide_count + 1):
+                    img_key = f"slide_{i}_image"
+                    if img_key in extra_images and extra_images[img_key]:
+                        image_paths.append(f"backend/generated_images/{extra_images[img_key]}")
+            
+            if len(image_paths) < 2:
+                scheduled.status = "failed"
+                scheduled.error_message = "Not enough images for carousel"
+                await db.commit()
+                return
+            
+            # Post to Instagram
+            print(f"[Scheduler] Posting carousel to Instagram...")
+            result = await post_carousel_to_instagram(
+                image_paths=image_paths,
+                caption=post.caption,
+                hashtags=post.hashtags,
+                base_url=BASE_URL,
+                access_token=settings.instagram_access_token
+            )
         
         if result["status"] == "success":
             scheduled.status = "posted"
@@ -156,6 +176,100 @@ async def process_scheduled_post(db: AsyncSession, scheduled: ScheduledPost, aut
 
 async def generate_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost, auto_settings: AutoPostSettings) -> Post:
     """Generate a new post for a scheduled item."""
+    
+    # Check post type
+    post_type = getattr(scheduled, 'post_type', 'carousel') or 'carousel'
+    
+    if post_type == "news":
+        return await generate_news_post_for_schedule(db, scheduled, auto_settings)
+    else:
+        return await generate_carousel_post_for_schedule(db, scheduled, auto_settings)
+
+
+async def generate_news_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost, auto_settings: AutoPostSettings) -> Post:
+    """Generate a news post for a scheduled item."""
+    print(f"[Scheduler] Generating news post for scheduled {scheduled.id}")
+    
+    # Get news settings
+    accent_color = getattr(scheduled, 'news_accent_color', None) or getattr(auto_settings, 'news_accent_color', 'cyan') or 'cyan'
+    time_range = getattr(scheduled, 'news_time_range', None) or getattr(auto_settings, 'news_time_range', '1d') or '1d'
+    auto_select = getattr(scheduled, 'news_auto_select', None)
+    if auto_select is None:
+        auto_select = getattr(auto_settings, 'news_auto_select', True)
+    
+    # Fetch news
+    news = await search_news_serpapi(time_range=time_range)
+    if not news:
+        print("[Scheduler] No news found")
+        return None
+    
+    # Select news item
+    if auto_select:
+        news_item = await select_most_viral_topic(news)
+    else:
+        news_item = news[0]
+    
+    # Generate headline
+    headline = await generate_hook_headline(news_item["title"], news_item.get("snippet", ""))
+    category = news_item.get("category", "SUPPLY CHAIN")
+    
+    # Generate caption
+    caption = await generate_ai_news_caption(news_item)
+    
+    # Map accent color
+    accent_colors = {
+        "cyan": (0, 200, 255),
+        "blue": (59, 130, 246),
+        "green": (34, 197, 94),
+        "orange": (249, 115, 22),
+        "red": (239, 68, 68),
+        "yellow": (234, 179, 8),
+        "pink": (236, 72, 153),
+        "purple": (168, 85, 247),
+    }
+    accent_rgb = accent_colors.get(accent_color, (0, 200, 255))
+    
+    # Render image
+    image_path = await render_news_post(
+        headline=headline,
+        category=category,
+        accent_color=accent_rgb,
+    )
+    
+    import os
+    image_filename = os.path.basename(image_path)
+    
+    # Create post record
+    post = Post(
+        topic=headline,
+        template_id="news_post",
+        slide_1_text=headline,
+        slide_2_text="",
+        slide_3_text="",
+        slide_4_text="",
+        caption=caption,
+        hashtags="#supplychain #logistics #news #freight #shipping",
+        slide_1_image=image_filename,
+        slide_2_image=None,
+        slide_3_image=None,
+        slide_4_image=None,
+        metadata_json={
+            "post_type": "news",
+            "category": category,
+            "auto_generated": True,
+            "news_item": news_item
+        }
+    )
+    
+    db.add(post)
+    await db.commit()
+    await db.refresh(post)
+    
+    return post
+
+
+async def generate_carousel_post_for_schedule(db: AsyncSession, scheduled: ScheduledPost, auto_settings: AutoPostSettings) -> Post:
+    """Generate a carousel post for a scheduled item."""
     
     # Get settings - use scheduled overrides or defaults
     template_id = scheduled.template_id or auto_settings.default_template_id or "problem_first"

@@ -1482,9 +1482,37 @@
   color: var(--color-text-secondary);
 }
 
+.queue-item-type {
+  display: flex;
+  align-items: center;
+}
+
+.type-badge {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.type-badge.carousel {
+  background: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+}
+
+.type-badge.news {
+  background: rgba(14, 165, 233, 0.2);
+  color: #38bdf8;
+}
+
 .queue-item-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.error-hint {
+  cursor: help;
+  font-size: 16px;
 }
 
 .btn-danger {
@@ -1499,6 +1527,93 @@
 .btn-sm {
   padding: 6px 12px;
   font-size: 12px;
+}
+
+/* Post Distribution */
+.distribution-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.distribution-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.count-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.count-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.count-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+}
+
+.count-btn.selected {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
+.total-posts {
+  padding: 12px;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.total-posts .hint {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* Color Picker Row */
+.color-picker-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.color-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.color-btn:hover {
+  transform: scale(1.1);
+}
+
+.color-btn.selected {
+  border-color: white;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* Full Width Setting Row */
+.setting-row.full-width {
+  grid-column: 1 / -1;
 }
 
 /* Post Actions in History */

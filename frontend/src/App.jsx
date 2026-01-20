@@ -1255,15 +1255,22 @@ function AutoPostPage({
   const [localSettings, setLocalSettings] = useState(settings || {
     enabled: false,
     posts_per_day: 3,
+    carousel_count: 2,
+    news_count: 1,
+    equal_distribution: true,
     default_template_id: null,
     default_color_theme: null,
     default_texture: null,
     default_layout: null,
     default_slide_count: 4,
+    news_accent_color: 'cyan',
+    news_time_range: '1d',
+    news_auto_select: true,
     instagram_username: '',
   })
   const [newPostSettings, setNewPostSettings] = useState({
     useDefault: true,
+    post_type: 'carousel',
     template_id: null,
     color_theme: null,
     texture: null,
@@ -1275,7 +1282,16 @@ function AutoPostPage({
 
   useEffect(() => {
     if (settings) {
-      setLocalSettings(settings)
+      setLocalSettings({
+        ...localSettings,
+        ...settings,
+        carousel_count: settings.carousel_count ?? 2,
+        news_count: settings.news_count ?? 1,
+        equal_distribution: settings.equal_distribution ?? true,
+        news_accent_color: settings.news_accent_color ?? 'cyan',
+        news_time_range: settings.news_time_range ?? '1d',
+        news_auto_select: settings.news_auto_select ?? true,
+      })
     }
     checkInstagramConnection()
   }, [settings])
@@ -1370,32 +1386,64 @@ function AutoPostPage({
         </p>
       </div>
 
-      {/* Posting Frequency */}
+      {/* Post Type Distribution */}
       <div className="autopost-card">
-        <h3>Posting Frequency</h3>
-        <div className="frequency-selector">
-          <label className="form-label">Posts per day</label>
-          <div className="frequency-buttons">
-            {[1, 2, 3, 4, 5, 6].map((num) => (
-              <button
-                key={num}
-                className={`freq-btn ${localSettings.posts_per_day === num ? 'selected' : ''}`}
-                onClick={() => setLocalSettings({ ...localSettings, posts_per_day: num })}
-              >
-                {num}
-              </button>
-            ))}
+        <h3>📊 Post Distribution</h3>
+        <p className="form-hint">Choose how many of each post type to publish daily</p>
+        
+        <div className="distribution-grid">
+          <div className="distribution-item">
+            <label className="form-label">📸 Carousels per day</label>
+            <div className="count-buttons">
+              {[0, 1, 2, 3, 4, 5].map((num) => (
+                <button
+                  key={num}
+                  className={`count-btn ${localSettings.carousel_count === num ? 'selected' : ''}`}
+                  onClick={() => setLocalSettings({ ...localSettings, carousel_count: num, posts_per_day: num + localSettings.news_count })}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="form-hint">
-            Posts will be spread evenly across 24 hours ({(24 / localSettings.posts_per_day).toFixed(1)} hours apart)
-          </p>
+
+          <div className="distribution-item">
+            <label className="form-label">📰 News Posts per day</label>
+            <div className="count-buttons">
+              {[0, 1, 2, 3, 4, 5].map((num) => (
+                <button
+                  key={num}
+                  className={`count-btn ${localSettings.news_count === num ? 'selected' : ''}`}
+                  onClick={() => setLocalSettings({ ...localSettings, news_count: num, posts_per_day: localSettings.carousel_count + num })}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
+
+        <div className="total-posts">
+          <strong>Total: {(localSettings.carousel_count || 0) + (localSettings.news_count || 0)} posts/day</strong>
+          <span className="hint">
+            ({(24 / Math.max((localSettings.carousel_count || 0) + (localSettings.news_count || 0), 1)).toFixed(1)} hours apart)
+          </span>
+        </div>
+
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={localSettings.equal_distribution}
+            onChange={(e) => setLocalSettings({ ...localSettings, equal_distribution: e.target.checked })}
+          />
+          <span>Distribute equally throughout the day (mix post types)</span>
+        </label>
       </div>
 
-      {/* Default Settings */}
+      {/* Carousel Default Settings */}
       <div className="autopost-card">
-        <h3>Default Post Settings</h3>
-        <p className="form-hint">Leave as "Random" to randomize each post's style</p>
+        <h3>📸 Carousel Defaults</h3>
+        <p className="form-hint">Leave as "Random" to randomize each carousel's style</p>
         
         <div className="default-settings-grid">
           <div className="setting-row">
@@ -1465,6 +1513,56 @@ function AutoPostPage({
                 <option key={n} value={n}>{n} slides</option>
               ))}
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* News Post Default Settings */}
+      <div className="autopost-card">
+        <h3>📰 News Post Defaults</h3>
+        <p className="form-hint">Settings for auto-generated news posts</p>
+        
+        <div className="default-settings-grid">
+          <div className="setting-row">
+            <label className="form-label">Highlight Color</label>
+            <div className="color-picker-row">
+              {['cyan', 'blue', 'green', 'orange', 'red', 'yellow', 'pink', 'purple'].map(color => (
+                <button
+                  key={color}
+                  className={`color-btn ${localSettings.news_accent_color === color ? 'selected' : ''}`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => setLocalSettings({ ...localSettings, news_accent_color: color })}
+                  title={color}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="setting-row">
+            <label className="form-label">News Time Range</label>
+            <select
+              className="form-select"
+              value={localSettings.news_time_range || '1d'}
+              onChange={(e) => setLocalSettings({ ...localSettings, news_time_range: e.target.value })}
+            >
+              <option value="today">Today</option>
+              <option value="1d">Past 24 Hours</option>
+              <option value="3d">Past 3 Days</option>
+              <option value="1w">Past Week</option>
+              <option value="2w">Past 2 Weeks</option>
+              <option value="4w">Past Month</option>
+            </select>
+          </div>
+
+          <div className="setting-row full-width">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={localSettings.news_auto_select}
+                onChange={(e) => setLocalSettings({ ...localSettings, news_auto_select: e.target.checked })}
+              />
+              <span>AI auto-selects most viral topic</span>
+            </label>
           </div>
         </div>
       </div>
@@ -1570,17 +1668,33 @@ function AutoPostPage({
         ) : (
           <div className="queue-list">
             {scheduledPosts.map((post) => (
-              <div key={post.id} className={`queue-item status-${post.status}`}>
+              <div key={post.id} className={`queue-item status-${post.status} type-${post.post_type || 'carousel'}`}>
                 <div className="queue-item-time">
                   <span className="queue-time">{formatTime(post.scheduled_time)}</span>
                   <span className={`queue-status ${post.status}`}>{post.status}</span>
                 </div>
+                <div className="queue-item-type">
+                  <span className={`type-badge ${post.post_type || 'carousel'}`}>
+                    {(post.post_type || 'carousel') === 'news' ? '📰 News' : '📸 Carousel'}
+                  </span>
+                </div>
                 <div className="queue-item-details">
-                  <span>{post.template_id || 'Random'}</span>
-                  <span>•</span>
-                  <span>{post.color_theme || 'Random'}</span>
-                  <span>•</span>
-                  <span>{post.texture || 'Random'}</span>
+                  {(post.post_type || 'carousel') === 'carousel' ? (
+                    <>
+                      <span>{post.template_id || 'Random'}</span>
+                      <span>•</span>
+                      <span>{post.color_theme || 'Random'}</span>
+                      <span>•</span>
+                      <span>{post.slide_count || 4} slides</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ color: post.news_accent_color || 'cyan' }}>●</span>
+                      <span>{post.news_time_range || '1d'}</span>
+                      <span>•</span>
+                      <span>{post.news_auto_select ? 'AI Select' : 'Latest'}</span>
+                    </>
+                  )}
                 </div>
                 <div className="queue-item-actions">
                   {post.status === 'pending' && (
@@ -1590,6 +1704,9 @@ function AutoPostPage({
                     >
                       Cancel
                     </button>
+                  )}
+                  {post.status === 'failed' && post.error_message && (
+                    <span className="error-hint" title={post.error_message}>⚠️</span>
                   )}
                 </div>
               </div>

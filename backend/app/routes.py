@@ -468,11 +468,21 @@ async def list_used_topics(
 class AutoPostSettingsRequest(BaseModel):
     enabled: bool = False
     posts_per_day: int = 3
+    # Post type distribution
+    carousel_count: int = 2
+    news_count: int = 1
+    equal_distribution: bool = True
+    # Carousel defaults
     default_template_id: Optional[str] = None
     default_color_theme: Optional[str] = None
     default_texture: Optional[str] = None
     default_layout: Optional[str] = None
     default_slide_count: int = 4
+    # News defaults
+    news_accent_color: str = "cyan"
+    news_time_range: str = "1d"
+    news_auto_select: bool = True
+    # Credentials
     instagram_username: Optional[str] = None
     instagram_password: Optional[str] = None
 
@@ -481,11 +491,21 @@ class AutoPostSettingsResponse(BaseModel):
     id: int
     enabled: bool
     posts_per_day: int
+    # Post type distribution
+    carousel_count: int = 2
+    news_count: int = 1
+    equal_distribution: bool = True
+    # Carousel defaults
     default_template_id: Optional[str]
     default_color_theme: Optional[str]
     default_texture: Optional[str]
     default_layout: Optional[str]
     default_slide_count: int
+    # News defaults
+    news_accent_color: str = "cyan"
+    news_time_range: str = "1d"
+    news_auto_select: bool = True
+    # Credentials
     instagram_username: Optional[str]
     has_credentials: bool
 
@@ -505,11 +525,16 @@ class ScheduledPostResponse(BaseModel):
     post_id: Optional[int]
     scheduled_time: str
     status: str
+    post_type: str = "carousel"  # carousel or news
     template_id: Optional[str]
     color_theme: Optional[str]
     texture: Optional[str]
     layout: Optional[str]
     slide_count: int
+    # News settings
+    news_accent_color: Optional[str] = None
+    news_time_range: Optional[str] = None
+    news_auto_select: Optional[bool] = None
     instagram_post_id: Optional[str]
     error_message: Optional[str]
     created_at: str
@@ -527,6 +552,9 @@ async def get_auto_post_settings(db: AsyncSession = Depends(get_db)):
             settings_row = AutoPostSettings(
                 enabled=False,
                 posts_per_day=3,
+                carousel_count=2,
+                news_count=1,
+                equal_distribution=True,
                 default_slide_count=4
             )
             db.add(settings_row)
@@ -537,11 +565,17 @@ async def get_auto_post_settings(db: AsyncSession = Depends(get_db)):
             id=settings_row.id,
             enabled=settings_row.enabled,
             posts_per_day=settings_row.posts_per_day,
+            carousel_count=getattr(settings_row, 'carousel_count', 2) or 2,
+            news_count=getattr(settings_row, 'news_count', 1) or 1,
+            equal_distribution=getattr(settings_row, 'equal_distribution', True) if getattr(settings_row, 'equal_distribution', None) is not None else True,
             default_template_id=settings_row.default_template_id,
             default_color_theme=settings_row.default_color_theme,
             default_texture=settings_row.default_texture,
             default_layout=settings_row.default_layout,
             default_slide_count=settings_row.default_slide_count,
+            news_accent_color=getattr(settings_row, 'news_accent_color', 'cyan') or 'cyan',
+            news_time_range=getattr(settings_row, 'news_time_range', '1d') or '1d',
+            news_auto_select=getattr(settings_row, 'news_auto_select', True) if getattr(settings_row, 'news_auto_select', None) is not None else True,
             instagram_username=settings_row.instagram_username,
             has_credentials=bool(settings_row.instagram_password)
         )
@@ -552,11 +586,17 @@ async def get_auto_post_settings(db: AsyncSession = Depends(get_db)):
             id=0,
             enabled=False,
             posts_per_day=3,
+            carousel_count=2,
+            news_count=1,
+            equal_distribution=True,
             default_template_id=None,
             default_color_theme=None,
             default_texture=None,
             default_layout=None,
             default_slide_count=4,
+            news_accent_color="cyan",
+            news_time_range="1d",
+            news_auto_select=True,
             instagram_username=None,
             has_credentials=False
         )
@@ -577,11 +617,23 @@ async def update_auto_post_settings(
     
     settings_row.enabled = request.enabled
     settings_row.posts_per_day = request.posts_per_day
+    
+    # Post type distribution
+    settings_row.carousel_count = request.carousel_count
+    settings_row.news_count = request.news_count
+    settings_row.equal_distribution = request.equal_distribution
+    
+    # Carousel defaults
     settings_row.default_template_id = request.default_template_id
     settings_row.default_color_theme = request.default_color_theme
     settings_row.default_texture = request.default_texture
     settings_row.default_layout = request.default_layout
     settings_row.default_slide_count = request.default_slide_count
+    
+    # News defaults
+    settings_row.news_accent_color = request.news_accent_color
+    settings_row.news_time_range = request.news_time_range
+    settings_row.news_auto_select = request.news_auto_select
     
     if request.instagram_username is not None:
         settings_row.instagram_username = request.instagram_username
@@ -595,11 +647,17 @@ async def update_auto_post_settings(
         id=settings_row.id,
         enabled=settings_row.enabled,
         posts_per_day=settings_row.posts_per_day,
+        carousel_count=settings_row.carousel_count or 2,
+        news_count=settings_row.news_count or 1,
+        equal_distribution=settings_row.equal_distribution if settings_row.equal_distribution is not None else True,
         default_template_id=settings_row.default_template_id,
         default_color_theme=settings_row.default_color_theme,
         default_texture=settings_row.default_texture,
         default_layout=settings_row.default_layout,
         default_slide_count=settings_row.default_slide_count,
+        news_accent_color=settings_row.news_accent_color or "cyan",
+        news_time_range=settings_row.news_time_range or "1d",
+        news_auto_select=settings_row.news_auto_select if settings_row.news_auto_select is not None else True,
         instagram_username=settings_row.instagram_username,
         has_credentials=bool(settings_row.instagram_password)
     )
@@ -630,11 +688,15 @@ async def list_scheduled_posts(
             post_id=p.post_id,
             scheduled_time=p.scheduled_time.isoformat() if p.scheduled_time else "",
             status=p.status,
+            post_type=getattr(p, 'post_type', 'carousel') or 'carousel',
             template_id=p.template_id,
             color_theme=p.color_theme,
             texture=p.texture,
             layout=p.layout,
             slide_count=p.slide_count or 4,
+            news_accent_color=getattr(p, 'news_accent_color', None),
+            news_time_range=getattr(p, 'news_time_range', None),
+            news_auto_select=getattr(p, 'news_auto_select', None),
             instagram_post_id=p.instagram_post_id,
             error_message=p.error_message,
             created_at=p.created_at.isoformat() if p.created_at else ""
@@ -741,12 +803,20 @@ async def generate_schedule_queue(
     if not settings_row:
         raise HTTPException(status_code=400, detail="Auto-post settings not configured")
     
-    posts_per_day = settings_row.posts_per_day
-    interval_hours = 24 / posts_per_day
+    # Get post counts for each type
+    carousel_count = settings_row.carousel_count if hasattr(settings_row, 'carousel_count') else settings_row.posts_per_day
+    news_count = settings_row.news_count if hasattr(settings_row, 'news_count') else 0
+    total_posts = carousel_count + news_count
+    
+    if total_posts == 0:
+        return {"status": "success", "posts_created": 0, "posts": []}
+    
+    # Calculate time distribution
+    equal_distribution = settings_row.equal_distribution if hasattr(settings_row, 'equal_distribution') else True
+    interval_hours = 24 / total_posts if equal_distribution else 24 / max(total_posts, 1)
     
     # Clear existing pending posts for today
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = today_start + timedelta(days=1)
     
     # Get available options for randomization
     templates = get_all_templates()
@@ -757,25 +827,46 @@ async def generate_schedule_queue(
     
     created_posts = []
     
-    for i in range(posts_per_day):
+    # Build a list of post types to create
+    post_types = ["carousel"] * carousel_count + ["news"] * news_count
+    if equal_distribution:
+        random.shuffle(post_types)  # Mix them up for variety
+    
+    for i, post_type in enumerate(post_types):
         scheduled_time = today_start + timedelta(hours=interval_hours * i + interval_hours / 2)
         
-        # Use defaults or randomize
-        template_id = settings_row.default_template_id or random.choice(template_ids)
-        color_theme = settings_row.default_color_theme or random.choice(color_theme_ids)
-        texture = settings_row.default_texture or random.choice(texture_ids)
-        layout = settings_row.default_layout or weighted_layout_choice(layout_ids)
-        slide_count = settings_row.default_slide_count or 4
-        
-        scheduled_post = ScheduledPost(
-            scheduled_time=scheduled_time,
-            status="pending",
-            template_id=template_id,
-            color_theme=color_theme,
-            texture=texture,
-            layout=layout,
-            slide_count=slide_count
-        )
+        if post_type == "carousel":
+            # Carousel post settings
+            template_id = settings_row.default_template_id or random.choice(template_ids)
+            color_theme = settings_row.default_color_theme or random.choice(color_theme_ids)
+            texture = settings_row.default_texture or random.choice(texture_ids)
+            layout = settings_row.default_layout or weighted_layout_choice(layout_ids)
+            slide_count = settings_row.default_slide_count or 4
+            
+            scheduled_post = ScheduledPost(
+                scheduled_time=scheduled_time,
+                status="pending",
+                post_type="carousel",
+                template_id=template_id,
+                color_theme=color_theme,
+                texture=texture,
+                layout=layout,
+                slide_count=slide_count
+            )
+        else:
+            # News post settings
+            news_accent = settings_row.news_accent_color if hasattr(settings_row, 'news_accent_color') else "cyan"
+            news_time = settings_row.news_time_range if hasattr(settings_row, 'news_time_range') else "1d"
+            news_auto = settings_row.news_auto_select if hasattr(settings_row, 'news_auto_select') else True
+            
+            scheduled_post = ScheduledPost(
+                scheduled_time=scheduled_time,
+                status="pending",
+                post_type="news",
+                news_accent_color=news_accent,
+                news_time_range=news_time,
+                news_auto_select=news_auto
+            )
         
         db.add(scheduled_post)
         created_posts.append(scheduled_post)
@@ -789,14 +880,15 @@ async def generate_schedule_queue(
     return {
         "status": "success",
         "posts_created": len(created_posts),
+        "carousel_count": carousel_count,
+        "news_count": news_count,
         "posts": [
             {
                 "id": p.id,
                 "scheduled_time": p.scheduled_time.isoformat(),
+                "post_type": p.post_type if hasattr(p, 'post_type') else "carousel",
                 "template_id": p.template_id,
                 "color_theme": p.color_theme,
-                "texture": p.texture,
-                "layout": p.layout
             }
             for p in created_posts
         ]

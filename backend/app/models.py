@@ -40,6 +40,7 @@ class ScheduledPost(Base):
     post_id = Column(Integer, nullable=True)  # Link to generated post (optional, can generate on-the-fly)
     scheduled_time = Column(DateTime(timezone=True), nullable=False)
     status = Column(String(20), default="pending")  # pending, posted, failed, cancelled
+    post_type = Column(String(20), default="carousel")  # carousel or news
     
     # Post settings (for generating on-the-fly or overriding)
     template_id = Column(String(50), nullable=True)  # None = random
@@ -47,6 +48,11 @@ class ScheduledPost(Base):
     texture = Column(String(50), nullable=True)  # None = random
     layout = Column(String(50), nullable=True)  # None = random
     slide_count = Column(Integer, default=4)
+    
+    # News post settings
+    news_accent_color = Column(String(50), nullable=True)
+    news_time_range = Column(String(20), nullable=True)
+    news_auto_select = Column(Boolean, nullable=True)
     
     # Result tracking
     instagram_post_id = Column(String(100), nullable=True)
@@ -65,12 +71,22 @@ class AutoPostSettings(Base):
     enabled = Column(Boolean, default=False)
     posts_per_day = Column(Integer, default=3)
     
-    # Default settings for auto-generated posts
+    # Post type distribution
+    carousel_count = Column(Integer, default=2)  # Number of carousels per day
+    news_count = Column(Integer, default=1)  # Number of news posts per day
+    equal_distribution = Column(Boolean, default=True)  # Spread posts equally throughout day
+    
+    # Default settings for auto-generated carousel posts
     default_template_id = Column(String(50), nullable=True)  # None = random
     default_color_theme = Column(String(50), nullable=True)  # None = random
     default_texture = Column(String(50), nullable=True)  # None = random
     default_layout = Column(String(50), nullable=True)  # None = random
     default_slide_count = Column(Integer, default=4)
+    
+    # Default settings for news posts
+    news_accent_color = Column(String(50), default="cyan")
+    news_time_range = Column(String(20), default="1d")
+    news_auto_select = Column(Boolean, default=True)
     
     # Instagram credentials (stored securely)
     instagram_username = Column(String(100), nullable=True)

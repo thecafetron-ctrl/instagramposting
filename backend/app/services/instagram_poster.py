@@ -357,15 +357,28 @@ async def post_single_image_to_instagram(
             "message": "Failed to get Instagram user ID. Access token may be invalid."
         }
     
-    # Check image exists
-    if not image_path or not os.path.exists(image_path):
-        return {
-            "status": "error",
-            "message": f"Image not found: {image_path}"
-        }
+    # Check image exists - try multiple path options
+    possible_paths = [
+        image_path,
+        f"backend/generated_images/{os.path.basename(image_path)}",
+        f"generated_images/{os.path.basename(image_path)}",
+        os.path.basename(image_path),
+    ]
+    
+    actual_path = None
+    for p in possible_paths:
+        if p and os.path.exists(p):
+            actual_path = p
+            break
+    
+    if not actual_path:
+        print(f"Image not found. Tried: {possible_paths}")
+        # Don't fail - Instagram API will fetch from URL anyway
+        # Just use the filename for URL building
+        actual_path = image_path
     
     # Get public URL for the image
-    image_url = await upload_image_to_hosting(image_path, base_url)
+    image_url = await upload_image_to_hosting(actual_path, base_url)
     
     # Combine caption and hashtags
     full_caption = f"{caption}\n\n{hashtags}" if hashtags else caption
