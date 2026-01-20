@@ -30,7 +30,7 @@ BASE_URL = os.environ.get("PUBLIC_URL", "https://instagramposting-production-4e9
 
 
 async def check_and_post_scheduled():
-    """Check for scheduled posts that are due and post them. Auto-generates queue if needed."""
+    """Check for scheduled posts that are due and post them."""
     print(f"[Scheduler] Checking at {datetime.now(timezone.utc)}")
     
     session_maker = get_session_maker()
@@ -49,26 +49,11 @@ async def check_and_post_scheduled():
                 return
             
             now = datetime.now(timezone.utc)
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            today_end = today_start + timedelta(days=1)
             
-            # Check if we have any pending posts for today
-            result = await db.execute(
-                select(ScheduledPost)
-                .where(and_(
-                    ScheduledPost.status == "pending",
-                    ScheduledPost.scheduled_time >= today_start,
-                    ScheduledPost.scheduled_time < today_end
-                ))
-            )
-            today_pending = result.scalars().all()
+            # ONLY process posts that are scheduled - DO NOT auto-generate queue
+            # Queue generation is now ONLY manual via the API endpoint
             
-            # Auto-generate queue if no pending posts for today
-            if not today_pending:
-                print("[Scheduler] No pending posts for today - auto-generating queue")
-                await auto_generate_daily_queue(db, auto_settings)
-            
-            # Find pending posts that are due NOW
+            # Find pending posts that are due NOW (scheduled_time has passed)
             result = await db.execute(
                 select(ScheduledPost)
                 .where(and_(
@@ -76,7 +61,7 @@ async def check_and_post_scheduled():
                     ScheduledPost.scheduled_time <= now
                 ))
                 .order_by(ScheduledPost.scheduled_time)
-                .limit(3)  # Process up to 3 at a time to avoid rate limits
+                .limit(1)  # Process ONLY 1 at a time to be safe
             )
             due_posts = result.scalars().all()
             
@@ -84,12 +69,11 @@ async def check_and_post_scheduled():
                 print("[Scheduler] No posts due right now")
                 return
             
-            print(f"[Scheduler] Found {len(due_posts)} posts to process")
+            print(f"[Scheduler] Found {len(due_posts)} post(s) to process")
             
-            for scheduled in due_posts:
-                await process_scheduled_post(db, scheduled, auto_settings)
-                # Small delay between posts to avoid rate limiting
-                await asyncio.sleep(5)
+            # Process only ONE post per check cycle
+            scheduled = due_posts[0]
+            await process_scheduled_post(db, scheduled, auto_settings)
                 
         except Exception as e:
             print(f"[Scheduler] Error: {e}")
@@ -491,25 +475,19 @@ def start_scheduler():
         print("[Scheduler] Already running")
         return
     
-    # Check every 2 minutes
+    # Check every 5 minutes (not too frequent to avoid spam)
     scheduler.add_job(
         check_and_post_scheduled,
-        IntervalTrigger(minutes=2),
+        IntervalTrigger(minutes=5),
         id="auto_post_checker",
         replace_existing=True,
-        max_instances=1
+        max_instances=1  # Prevent overlapping runs
     )
     
-    # Also run immediately on startup to check if anything is due
-    scheduler.add_job(
-        check_and_post_scheduled,
-        'date',  # Run once immediately
-        id="startup_check",
-        replace_existing=True,
-    )
+    # DO NOT run immediately on startup - wait for first interval
     
     scheduler.start()
-    print("[Scheduler] Started - checking every 2 minutes (initial check scheduled)")
+    print("[Scheduler] Started - checking every 5 minutes")
 
 
 async def trigger_manual_check():

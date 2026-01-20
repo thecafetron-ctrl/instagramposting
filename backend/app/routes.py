@@ -1564,3 +1564,28 @@ async def trigger_scheduler_check():
         return {"status": "ok", "message": "Scheduler check triggered"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.post("/emergency/stop")
+async def emergency_stop(db: AsyncSession = Depends(get_db)):
+    """EMERGENCY: Disable auto-posting and cancel all pending posts."""
+    # Disable auto-posting
+    result = await db.execute(select(AutoPostSettings).limit(1))
+    settings_row = result.scalar_one_or_none()
+    if settings_row:
+        settings_row.enabled = False
+    
+    # Cancel all pending posts
+    from sqlalchemy import update
+    await db.execute(
+        update(ScheduledPost)
+        .where(ScheduledPost.status == "pending")
+        .values(status="cancelled")
+    )
+    
+    await db.commit()
+    
+    return {
+        "status": "STOPPED",
+        "message": "Auto-posting disabled, all pending posts cancelled"
+    }
