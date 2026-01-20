@@ -1,14 +1,66 @@
 """
 News discovery service for supply chain and logistics news.
 Uses SerpAPI to find latest news articles.
+Uses OpenAI to generate engaging hook headlines.
 """
 
 import httpx
 import random
 from datetime import datetime
+from openai import AsyncOpenAI
 from app.config import get_settings
 
 settings = get_settings()
+
+
+async def generate_hook_headline(original_title: str, snippet: str = "") -> str:
+    """
+    Use OpenAI to generate an engaging hook headline from the news.
+    Makes it punchy, attention-grabbing, and suitable for Instagram.
+    """
+    if not settings.openai_api_key:
+        return original_title
+    
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        
+        prompt = f"""Transform this news headline into a punchy, attention-grabbing Instagram hook.
+
+Original headline: {original_title}
+Context: {snippet[:200] if snippet else 'N/A'}
+
+Requirements:
+- Maximum 12 words
+- Make it dramatic and engaging
+- Use power words that grab attention
+- Keep it factual but compelling
+- No clickbait, but make people want to read more
+- Focus on the impact or significance
+- ALL CAPS style
+
+Examples of good hooks:
+- "AMAZON JUST CHANGED EVERYTHING FOR SUPPLY CHAINS"
+- "THIS IS WHY SHIPPING COSTS ARE EXPLODING"
+- "THE AI REVOLUTION HITTING LOGISTICS RIGHT NOW"
+- "GLOBAL TRADE CRISIS: WHAT YOU NEED TO KNOW"
+
+Return ONLY the new headline, nothing else."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=50,
+            temperature=0.8,
+        )
+        
+        hook = response.choices[0].message.content.strip()
+        # Clean up any quotes
+        hook = hook.strip('"\'')
+        return hook.upper()
+        
+    except Exception as e:
+        print(f"OpenAI hook generation error: {e}")
+        return original_title.upper()
 
 # News search queries for supply chain/logistics
 NEWS_QUERIES = [
