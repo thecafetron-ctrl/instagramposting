@@ -308,6 +308,15 @@ function App() {
           base_url: publicUrl
         }),
       })
+      
+      // Check if response is JSON
+      const contentType = res.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text()
+        console.error('Non-JSON response:', text.substring(0, 500))
+        throw new Error(`Server error (${res.status}): ${text.substring(0, 200)}`)
+      }
+      
       const data = await res.json()
       
       if (data.status === 'success') {
