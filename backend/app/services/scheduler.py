@@ -4,7 +4,7 @@ Background scheduler for auto-posting to Instagram.
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select, and_
@@ -30,8 +30,8 @@ BASE_URL = os.environ.get("PUBLIC_URL", "https://instagramposting-production-4e9
 
 
 async def check_and_post_scheduled():
-    """Check for scheduled posts that are due and post them."""
-    print(f"[Scheduler] Checking for scheduled posts at {datetime.now(timezone.utc)}")
+    """Check for scheduled posts that are due and post them. Auto-generates queue if needed."""
+    print(f"[Scheduler] Checking at {datetime.now(timezone.utc)}")
     
     session_maker = get_session_maker()
     if not session_maker:
@@ -48,8 +48,27 @@ async def check_and_post_scheduled():
                 print("[Scheduler] Auto-posting is disabled")
                 return
             
-            # Find pending posts that are due
             now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            today_end = today_start + timedelta(days=1)
+            
+            # Check if we have any pending posts for today
+            result = await db.execute(
+                select(ScheduledPost)
+                .where(and_(
+                    ScheduledPost.status == "pending",
+                    ScheduledPost.scheduled_time >= today_start,
+                    ScheduledPost.scheduled_time < today_end
+                ))
+            )
+            today_pending = result.scalars().all()
+            
+            # Auto-generate queue if no pending posts for today
+            if not today_pending:
+                print("[Scheduler] No pending posts for today - auto-generating queue")
+                await auto_generate_daily_queue(db, auto_settings)
+            
+            # Find pending posts that are due NOW
             result = await db.execute(
                 select(ScheduledPost)
                 .where(and_(
@@ -57,23 +76,100 @@ async def check_and_post_scheduled():
                     ScheduledPost.scheduled_time <= now
                 ))
                 .order_by(ScheduledPost.scheduled_time)
-                .limit(5)  # Process up to 5 at a time
+                .limit(3)  # Process up to 3 at a time to avoid rate limits
             )
             due_posts = result.scalars().all()
             
             if not due_posts:
-                print("[Scheduler] No posts due")
+                print("[Scheduler] No posts due right now")
                 return
             
             print(f"[Scheduler] Found {len(due_posts)} posts to process")
             
             for scheduled in due_posts:
                 await process_scheduled_post(db, scheduled, auto_settings)
+                # Small delay between posts to avoid rate limiting
+                await asyncio.sleep(5)
                 
         except Exception as e:
             print(f"[Scheduler] Error: {e}")
             import traceback
             traceback.print_exc()
+
+
+async def auto_generate_daily_queue(db: AsyncSession, auto_settings: AutoPostSettings):
+    """Automatically generate today's posting queue based on settings."""
+    # Get post counts
+    carousel_count = getattr(auto_settings, 'carousel_count', 2) or 2
+    news_count = getattr(auto_settings, 'news_count', 1) or 1
+    total_posts = carousel_count + news_count
+    
+    if total_posts == 0:
+        print("[Scheduler] No posts configured - carousel_count and news_count both 0")
+        return
+    
+    # Calculate time distribution
+    equal_distribution = getattr(auto_settings, 'equal_distribution', True)
+    interval_hours = 24 / total_posts
+    
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Build a list of post types to create
+    post_types = ["carousel"] * carousel_count + ["news"] * news_count
+    if equal_distribution:
+        random.shuffle(post_types)  # Mix them up for variety
+    
+    created_count = 0
+    
+    for i, post_type in enumerate(post_types):
+        # Calculate scheduled time - spread throughout the day
+        scheduled_time = today_start + timedelta(hours=interval_hours * i + interval_hours / 2)
+        
+        # Skip if the time has already passed (more than 30 min ago)
+        if scheduled_time < now - timedelta(minutes=30):
+            continue
+        
+        if post_type == "carousel":
+            # Carousel post settings
+            template_id = auto_settings.default_template_id or "random"
+            color_theme = auto_settings.default_color_theme or "random"
+            texture = auto_settings.default_texture or "random"
+            layout = auto_settings.default_layout or "random"
+            slide_count = auto_settings.default_slide_count or 4
+            
+            scheduled_post = ScheduledPost(
+                scheduled_time=scheduled_time,
+                status="pending",
+                post_type="carousel",
+                template_id=template_id,
+                color_theme=color_theme,
+                texture=texture,
+                layout=layout,
+                slide_count=slide_count
+            )
+        else:
+            # News post settings
+            news_accent = getattr(auto_settings, 'news_accent_color', 'cyan') or 'cyan'
+            news_time = getattr(auto_settings, 'news_time_range', '1d') or '1d'
+            news_auto = getattr(auto_settings, 'news_auto_select', True)
+            if news_auto is None:
+                news_auto = True
+            
+            scheduled_post = ScheduledPost(
+                scheduled_time=scheduled_time,
+                status="pending",
+                post_type="news",
+                news_accent_color=news_accent,
+                news_time_range=news_time,
+                news_auto_select=news_auto
+            )
+        
+        db.add(scheduled_post)
+        created_count += 1
+    
+    await db.commit()
+    print(f"[Scheduler] Auto-generated {created_count} posts for today")
 
 
 async def process_scheduled_post(db: AsyncSession, scheduled: ScheduledPost, auto_settings: AutoPostSettings):
