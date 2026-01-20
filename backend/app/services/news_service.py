@@ -370,63 +370,6 @@ Follow @structurelogistics for daily industry insights
     return caption.strip()
 
 
-async def select_most_viral_topic(news_items: list) -> dict:
-    """Use AI to select the most viral/engaging news topic from a list."""
-    if not news_items:
-        return None
-    
-    if len(news_items) == 1:
-        return news_items[0]
-    
-    if not settings.openai_api_key:
-        # Without AI, just pick the first one
-        return news_items[0]
-    
-    try:
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-        
-        # Format news items for AI
-        items_text = "\n".join([
-            f"{i+1}. {item['title']} ({item.get('source', 'Unknown')})"
-            for i, item in enumerate(news_items[:10])
-        ])
-        
-        prompt = f"""Select the news item that would be MOST engaging for a logistics/supply chain Instagram audience.
-
-Consider:
-- Viral potential (surprising, important, or dramatic)
-- Relevance to logistics professionals
-- Clear impact on the industry
-- Timely and actionable information
-
-News items:
-{items_text}
-
-Return ONLY the number (1, 2, 3, etc.) of the best item. Nothing else."""
-
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
-            temperature=0.3,
-        )
-        
-        choice = response.choices[0].message.content.strip()
-        
-        try:
-            index = int(choice) - 1
-            if 0 <= index < len(news_items):
-                return news_items[index]
-        except ValueError:
-            pass
-        
-        return news_items[0]
-        
-    except Exception as e:
-        print(f"Error selecting viral topic: {e}")
-        return news_items[0]
-
-
 def truncate_caption(caption: str, max_length: int = 2000) -> str:
     """Truncate caption to Instagram's limit (2200 chars, we use 2000 for safety)."""
     if len(caption) <= max_length:
