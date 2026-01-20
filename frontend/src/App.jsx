@@ -271,23 +271,32 @@ function App() {
   }
 
   const postToInstagram = async (postId) => {
-    // Get public base URL - for local dev, user needs ngrok or similar
-    const savedUrl = localStorage.getItem('instagram_public_url') || ''
-    const publicUrl = prompt(
-      'Enter your public base URL for images:\n\n' +
-      'Instagram requires publicly accessible image URLs.\n' +
-      'Run: ngrok http 8000\n' +
-      'Then paste the https URL here.\n\n' +
-      'Leave empty to cancel:',
-      savedUrl
-    )
+    // Auto-detect if we're on Railway or prompt for URL
+    const isRailway = window.location.hostname.includes('railway.app')
+    let publicUrl = ''
     
-    if (!publicUrl) {
-      alert('Instagram posting requires a public URL.\n\nUse ngrok to expose your local server.')
-      return
+    if (isRailway) {
+      // Use the Railway URL automatically
+      publicUrl = window.location.origin
+    } else {
+      // Local development - need ngrok or similar
+      const savedUrl = localStorage.getItem('instagram_public_url') || ''
+      publicUrl = prompt(
+        'Enter your public base URL for images:\n\n' +
+        'Instagram requires publicly accessible image URLs.\n' +
+        'Run: ngrok http 8000\n' +
+        'Then paste the https URL here.\n\n' +
+        'Leave empty to cancel:',
+        savedUrl
+      )
+      
+      if (!publicUrl) {
+        alert('Instagram posting requires a public URL.\n\nUse ngrok to expose your local server.')
+        return
+      }
+      
+      localStorage.setItem('instagram_public_url', publicUrl)
     }
-    
-    localStorage.setItem('instagram_public_url', publicUrl)
     
     setPostingToIG(true)
     try {
@@ -300,15 +309,26 @@ function App() {
         }),
       })
       const data = await res.json()
+      
       if (data.status === 'success') {
         alert(`✅ Posted to Instagram!\n\nPost ID: ${data.instagram_post_id}`)
       } else {
-        alert(`❌ Instagram Error:\n\n${data.message}`)
+        // More detailed error message
+        let errorMsg = `❌ Instagram Error:\n\n${data.message || 'Unknown error'}`
+        
+        if (data.message?.includes('media container')) {
+          errorMsg += '\n\n💡 This usually means Instagram cannot access the image URL. Try:\n'
+          errorMsg += '1. Check if images are publicly accessible\n'
+          errorMsg += '2. Use the diagnose endpoint: /api/instagram/diagnose/' + postId
+        }
+        
+        alert(errorMsg)
+        console.error('Instagram error details:', data)
       }
       return data
     } catch (err) {
       console.error('Failed to post to Instagram:', err)
-      alert('Failed to post to Instagram: ' + err.message)
+      alert('Failed to post to Instagram: ' + err.message + '\n\nCheck browser console for details.')
     } finally {
       setPostingToIG(false)
     }

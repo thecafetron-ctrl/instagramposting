@@ -65,12 +65,19 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-# Create directories
-Path("generated_images").mkdir(exist_ok=True)
+# Create directories - try multiple paths for compatibility
+for img_dir in ["generated_images", "backend/generated_images"]:
+    Path(img_dir).mkdir(exist_ok=True, parents=True)
 Path("static").mkdir(exist_ok=True)
 
-# Mount static files
-app.mount("/images", StaticFiles(directory="generated_images"), name="images")
+# Mount static files - find the correct images directory
+images_dir = Path("generated_images")
+if not images_dir.exists():
+    images_dir = Path("backend/generated_images")
+    images_dir.mkdir(exist_ok=True, parents=True)
+
+print(f"✓ Serving images from: {images_dir.absolute()}")
+app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
 
 # Mount frontend assets
 if Path("static/assets").exists():

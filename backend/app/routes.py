@@ -930,8 +930,9 @@ async def post_to_instagram(
         if not post.slide_1_image:
             raise HTTPException(status_code=400, detail="No image found for news post")
         
-        # Build full path
-        image_path = f"backend/generated_images/{post.slide_1_image}"
+        # Build full path - extract just filename to avoid double paths
+        filename = os.path.basename(post.slide_1_image)
+        image_path = f"generated_images/{filename}"
         
         ig_result = await post_single_image_to_instagram(
             image_path=image_path,
@@ -945,7 +946,9 @@ async def post_to_instagram(
         image_paths = []
         for img in [post.slide_1_image, post.slide_2_image, post.slide_3_image, post.slide_4_image]:
             if img:
-                image_paths.append(f"backend/generated_images/{img}")
+                # Extract just the filename (handle both "generated_images/file.png" and "file.png")
+                filename = os.path.basename(img)
+                image_paths.append(f"generated_images/{filename}")
         
         # Add any additional slides from metadata (slides 5+)
         if post.metadata_json and "extra_images" in post.metadata_json:
@@ -954,7 +957,8 @@ async def post_to_instagram(
             for i in range(5, slide_count + 1):
                 img_key = f"slide_{i}_image"
                 if img_key in extra_images and extra_images[img_key]:
-                    image_paths.append(f"backend/generated_images/{extra_images[img_key]}")
+                    filename = os.path.basename(extra_images[img_key])
+                    image_paths.append(f"generated_images/{filename}")
         
         if len(image_paths) < 2:
             raise HTTPException(
@@ -980,6 +984,99 @@ async def verify_instagram_connection():
     """Verify the Instagram API connection and get account info."""
     result = await verify_access_token()
     return result
+
+
+@router.get("/instagram/diagnose/{post_id}")
+async def diagnose_instagram_post(
+    post_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Diagnose why an Instagram post might fail.
+    Checks image accessibility and returns detailed info.
+    """
+    import httpx
+    import os
+    
+    result = await db.execute(select(Post).where(Post.id == post_id))
+    post = result.scalar_one_or_none()
+    
+    if not post:
+        return {"error": "Post not found"}
+    
+    base_url = os.environ.get("PUBLIC_URL", "https://instagramposting-production-4e91.up.railway.app")
+    
+    diagnosis = {
+        "post_id": post_id,
+        "base_url": base_url,
+        "is_news_post": post.metadata_json and post.metadata_json.get("post_type") == "news",
+        "images": [],
+        "instagram_token_valid": False,
+    }
+    
+    # Check Instagram token
+    token_result = await verify_access_token()
+    diagnosis["instagram_token_valid"] = token_result.get("status") == "valid"
+    diagnosis["instagram_user"] = token_result.get("username")
+    
+    # Get image list
+    if diagnosis["is_news_post"]:
+        images = [post.slide_1_image] if post.slide_1_image else []
+    else:
+        images = [post.slide_1_image, post.slide_2_image, post.slide_3_image, post.slide_4_image]
+        images = [img for img in images if img]
+        
+        # Add extra slides
+        if post.metadata_json and "extra_images" in post.metadata_json:
+            for i in range(5, 11):
+                img_key = f"slide_{i}_image"
+                if img_key in post.metadata_json["extra_images"]:
+                    images.append(post.metadata_json["extra_images"][img_key])
+    
+    # Check each image
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for img in images:
+            # Extract filename to handle paths like "generated_images/file.png"
+            filename = os.path.basename(img)
+            img_info = {
+                "filename": filename,
+                "original_value": img,
+                "local_path": f"generated_images/{filename}",
+                "url": f"{base_url}/images/{filename}",
+                "local_exists": False,
+                "url_accessible": False,
+                "url_status": None,
+                "content_type": None,
+            }
+            
+            # Check local file - try multiple paths
+            local_path = f"generated_images/{filename}"
+            if not os.path.exists(local_path):
+                local_path = f"backend/generated_images/{filename}"
+            img_info["local_exists"] = os.path.exists(local_path)
+            if img_info["local_exists"]:
+                img_info["file_size"] = os.path.getsize(local_path)
+                img_info["actual_path"] = local_path
+            
+            # Check URL accessibility
+            try:
+                response = await client.head(img_info["url"], follow_redirects=True)
+                img_info["url_status"] = response.status_code
+                img_info["url_accessible"] = response.status_code == 200
+                img_info["content_type"] = response.headers.get("content-type")
+            except Exception as e:
+                img_info["url_error"] = str(e)
+            
+            diagnosis["images"].append(img_info)
+    
+    # Summary
+    all_accessible = all(img["url_accessible"] for img in diagnosis["images"])
+    diagnosis["all_images_accessible"] = all_accessible
+    
+    if not all_accessible:
+        diagnosis["suggestion"] = "Some images are not publicly accessible. Instagram API requires images to be served via HTTPS URLs that Instagram's servers can reach."
+    
+    return diagnosis
 
 
 @router.post("/instagram/test")
