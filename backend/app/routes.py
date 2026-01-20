@@ -37,7 +37,7 @@ from app.services.topic_discovery import discover_fresh_topic, record_used_topic
 from app.services.content_generator import generate_carousel_content
 from app.services.image_renderer import get_renderer
 from app.services.instagram_poster import post_carousel_to_instagram, verify_access_token
-from app.services.news_service import search_news_serpapi, get_latest_news, generate_news_caption, generate_hook_headline, generate_ai_news_caption
+from app.services.news_service import search_news_serpapi, get_latest_news, generate_news_caption, generate_hook_headline, generate_ai_news_caption, select_most_viral_topic
 from app.services.news_renderer import render_news_post
 from app.config import get_settings
 
@@ -62,7 +62,11 @@ class NewsPostRequest(BaseModel):
     """Request for generating a news post."""
     custom_headline: Optional[str] = None  # If provided, use this instead of fetching news
     category: Optional[str] = None  # Category label (auto-detected if not provided)
-    accent_words: Optional[List[str]] = None  # Words to highlight in cyan
+    accent_words: Optional[List[str]] = None  # Words to highlight
+    accent_color: Optional[str] = "cyan"  # Highlight color: cyan, blue, green, orange, red, yellow, pink
+    time_range: Optional[str] = "1d"  # News age filter: today, 1d, 3d, 1w, 2w, 4w, anytime
+    auto_select: Optional[bool] = False  # Let AI pick most viral topic
+    selected_news_index: Optional[int] = None  # If provided, use this news item from the list
 
 
 class GenerateResponse(BaseModel):
@@ -909,17 +913,23 @@ async def test_instagram_post(
 # ============================================================================
 
 @router.get("/news/latest")
-async def get_news_articles(count: int = 5):
+async def get_news_articles(
+    count: int = 5,
+    time_range: str = "1d"
+):
     """
     Fetch latest supply chain and logistics news articles.
     Returns list of news items that can be used for news posts.
+    
+    time_range: today, 1d, 3d, 1w, 2w, 4w, anytime
     """
     try:
-        news = await get_latest_news(count=count)
+        news = await search_news_serpapi(time_range=time_range)
         return {
             "status": "success",
-            "news": news,
-            "count": len(news)
+            "news": news[:count],
+            "count": len(news[:count]),
+            "time_range": time_range
         }
     except Exception as e:
         return {
@@ -941,7 +951,7 @@ async def generate_news_post(
     try:
         # Get headline - either custom or from news API
         if request.custom_headline:
-            # Generate hook headline using AI
+            # Generate hook headline using AI (only improves if needed)
             headline = await generate_hook_headline(request.custom_headline, "")
             category = request.category or "SUPPLY CHAIN"
             # Create a news item for AI caption generation
@@ -953,24 +963,48 @@ async def generate_news_post(
             }
             caption = await generate_ai_news_caption(custom_news_item)
         else:
-            # Fetch latest news
-            news = await search_news_serpapi()
+            # Fetch latest news with time filter
+            time_range = request.time_range or "1d"
+            news = await search_news_serpapi(time_range=time_range)
             if not news:
                 raise HTTPException(status_code=500, detail="Failed to fetch news")
             
-            # Use first news item
-            news_item = news[0]
-            # Generate engaging hook headline using AI
+            # Select news item
+            if request.auto_select:
+                # AI picks the most viral topic
+                news_item = await select_most_viral_topic(news)
+            elif request.selected_news_index is not None and 0 <= request.selected_news_index < len(news):
+                # Use user-selected news item
+                news_item = news[request.selected_news_index]
+            else:
+                # Use first news item
+                news_item = news[0]
+            
+            # Generate headline - AI only improves if original is unclear
             headline = await generate_hook_headline(news_item["title"], news_item.get("snippet", ""))
             category = request.category or news_item.get("category", "SUPPLY CHAIN")
             # Generate detailed AI caption with full news info
             caption = await generate_ai_news_caption(news_item)
+        
+        # Map accent color name to RGB
+        accent_colors = {
+            "cyan": (0, 200, 255),
+            "blue": (59, 130, 246),
+            "green": (34, 197, 94),
+            "orange": (249, 115, 22),
+            "red": (239, 68, 68),
+            "yellow": (234, 179, 8),
+            "pink": (236, 72, 153),
+            "purple": (168, 85, 247),
+        }
+        accent_color = accent_colors.get(request.accent_color or "cyan", (0, 200, 255))
         
         # Render the news post image (async - fetches Unsplash image)
         image_path = await render_news_post(
             headline=headline,
             category=category,
             accent_words=request.accent_words,
+            accent_color=accent_color,
         )
         
         # Extract just the filename for the URL

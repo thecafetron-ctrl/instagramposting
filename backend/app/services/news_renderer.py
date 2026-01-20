@@ -28,7 +28,7 @@ TEXT_HEIGHT_RATIO = 0.42   # 42% for text
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-ACCENT_CYAN = (0, 200, 255)
+DEFAULT_ACCENT = (0, 200, 255)  # Cyan
 DARK_BG = (12, 12, 18)
 
 # Font paths
@@ -166,8 +166,11 @@ class NewsPostRenderer:
         except Exception as e:
             print(f"Logo loading error: {e}")
     
-    async def render_news_post(self, headline: str, category: str = "SUPPLY CHAIN", accent_words: list[str] = None) -> str:
+    async def render_news_post(self, headline: str, category: str = "SUPPLY CHAIN", accent_words: list[str] = None, accent_color: tuple = None) -> str:
         """Render news post with MASSIVE text."""
+        # Store accent color for use in drawing
+        self.accent_color = accent_color or DEFAULT_ACCENT
+        
         # Create base
         img = Image.new("RGB", (self.width, self.height), DARK_BG)
         
@@ -368,7 +371,7 @@ class NewsPostRenderer:
         for i, word in enumerate(words):
             word_clean = word.strip(".,!?\"'")
             is_accent = any(a == word_clean or a in word_clean for a in accent_words)
-            color = ACCENT_CYAN if is_accent else WHITE
+            color = self.accent_color if is_accent else WHITE
             
             # Heavy shadow for visibility
             for offset in range(6, 0, -1):
@@ -404,7 +407,7 @@ class NewsPostRenderer:
         return accent[:3]
 
 
-async def render_news_post(headline: str, category: str = "SUPPLY CHAIN", accent_words: list[str] = None) -> str:
+async def render_news_post(headline: str, category: str = "SUPPLY CHAIN", accent_words: list[str] = None, accent_color: tuple = None) -> str:
     """Convenience function."""
     renderer = NewsPostRenderer()
-    return await renderer.render_news_post(headline=headline, category=category, accent_words=accent_words)
+    return await renderer.render_news_post(headline=headline, category=category, accent_words=accent_words, accent_color=accent_color)

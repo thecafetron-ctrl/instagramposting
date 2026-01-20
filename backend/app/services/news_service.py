@@ -15,52 +15,113 @@ settings = get_settings()
 
 async def generate_hook_headline(original_title: str, snippet: str = "") -> str:
     """
-    Use OpenAI to generate an engaging hook headline from the news.
-    Makes it punchy, attention-grabbing, and suitable for Instagram.
+    Use OpenAI to improve headline ONLY if needed.
+    Keeps good headlines, fixes unclear ones. No exclamation marks.
+    User should understand what happened just by reading the title.
     """
     if not settings.openai_api_key:
-        return original_title
+        return original_title.upper()
     
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
         
-        prompt = f"""Transform this news headline into a punchy, attention-grabbing Instagram hook.
+        prompt = f"""Evaluate and possibly improve this news headline for an Instagram news post.
 
 Original headline: {original_title}
-Context: {snippet[:200] if snippet else 'N/A'}
+Context: {snippet[:300] if snippet else 'N/A'}
 
-Requirements:
-- Maximum 12 words
-- Make it dramatic and engaging
-- Use power words that grab attention
-- Keep it factual but compelling
-- No clickbait, but make people want to read more
-- Focus on the impact or significance
-- ALL CAPS style
+CRITICAL RULES:
+1. The headline must clearly tell the reader WHAT HAPPENED - they should understand the news just from reading it
+2. NO exclamation marks ever
+3. Maximum 10 words
+4. ALL CAPS
+5. If the original headline is already clear and explanatory, KEEP IT (just make it ALL CAPS)
+6. Only change it if it's vague, clickbaity, or doesn't explain what actually happened
+7. Be factual and specific - include key details (company names, numbers, locations if relevant)
+8. No hype words, no clickbait, no "THIS IS WHY" style hooks
 
-Examples of good hooks:
-- "AMAZON JUST CHANGED EVERYTHING FOR SUPPLY CHAINS"
-- "THIS IS WHY SHIPPING COSTS ARE EXPLODING"
-- "THE AI REVOLUTION HITTING LOGISTICS RIGHT NOW"
-- "GLOBAL TRADE CRISIS: WHAT YOU NEED TO KNOW"
+GOOD HEADLINES (clear, tells you what happened):
+- "AMAZON CUTS 18000 WAREHOUSE JOBS AMID SLOWDOWN"
+- "OCEAN FREIGHT RATES DROP 40 PERCENT FROM PEAK"
+- "NEW AI SYSTEM PREDICTS SUPPLY CHAIN DELAYS"
+- "PORT OF LA CLEARS CONTAINER BACKLOG"
 
-Return ONLY the new headline, nothing else."""
+BAD HEADLINES (vague, clickbait, doesn't explain):
+- "THIS CHANGES EVERYTHING FOR SHIPPING!" (vague, exclamation)
+- "YOU WON'T BELIEVE WHAT HAPPENED" (clickbait)
+- "MAJOR NEWS FOR LOGISTICS" (doesn't say what)
+
+Return ONLY the final headline in ALL CAPS, nothing else."""
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=50,
-            temperature=0.8,
+            temperature=0.3,  # Lower temp for more factual output
         )
         
         hook = response.choices[0].message.content.strip()
-        # Clean up any quotes
         hook = hook.strip('"\'')
+        # Remove any exclamation marks
+        hook = hook.replace('!', '')
         return hook.upper()
         
     except Exception as e:
         print(f"OpenAI hook generation error: {e}")
-        return original_title.upper()
+        return original_title.upper().replace('!', '')
+
+
+async def select_most_viral_topic(news_items: list[dict]) -> dict:
+    """
+    Use AI to select the news item most likely to go viral on Instagram.
+    """
+    if not settings.openai_api_key or not news_items:
+        return news_items[0] if news_items else None
+    
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        
+        # Format news items for AI
+        news_list = "\n".join([
+            f"{i+1}. {item['title']} - {item.get('snippet', '')[:100]}"
+            for i, item in enumerate(news_items[:10])
+        ])
+        
+        prompt = f"""From these supply chain/logistics news items, pick the ONE most likely to go viral on Instagram.
+
+Consider:
+- Broad appeal (affects many people/businesses)
+- Surprising or significant impact
+- Clear, easy to understand
+- Timely and relevant
+- Would make people want to share/comment
+
+NEWS ITEMS:
+{news_list}
+
+Return ONLY the number (1-{min(10, len(news_items))}) of the best item, nothing else."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=5,
+            temperature=0.3,
+        )
+        
+        result = response.choices[0].message.content.strip()
+        # Extract number
+        import re
+        match = re.search(r'\d+', result)
+        if match:
+            index = int(match.group()) - 1
+            if 0 <= index < len(news_items):
+                return news_items[index]
+        
+        return news_items[0]
+        
+    except Exception as e:
+        print(f"Viral topic selection error: {e}")
+        return news_items[0] if news_items else None
 
 # News search queries for supply chain/logistics
 NEWS_QUERIES = [
@@ -93,10 +154,12 @@ NEWS_CATEGORIES = [
 ]
 
 
-async def search_news_serpapi(query: str = None) -> list[dict]:
+async def search_news_serpapi(query: str = None, time_range: str = "1d") -> list[dict]:
     """
     Search for latest news using SerpAPI Google News.
     Returns list of news articles with title, snippet, source, link, and image.
+    
+    time_range options: today, 1d, 3d, 1w, 2w, 4w, anytime
     """
     serpapi_key = settings.serpapi_key
     
@@ -106,18 +169,38 @@ async def search_news_serpapi(query: str = None) -> list[dict]:
     if query is None:
         query = random.choice(NEWS_QUERIES)
     
+    # Map time_range to SerpAPI tbs parameter
+    time_params = {
+        "today": "qdr:d",      # Past 24 hours
+        "1d": "qdr:d",         # Past day
+        "3d": "qdr:d3",        # Past 3 days (custom)
+        "1w": "qdr:w",         # Past week
+        "2w": "qdr:w2",        # Past 2 weeks (custom)
+        "4w": "qdr:m",         # Past month
+        "anytime": None,       # No filter
+    }
+    
+    tbs = time_params.get(time_range, "qdr:d")
+    
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
+            # Build params
+            params = {
+                "q": query,
+                "api_key": serpapi_key,
+                "engine": "google_news",
+                "gl": "us",
+                "hl": "en",
+            }
+            
+            # Add time filter if specified
+            if tbs:
+                params["tbs"] = tbs
+            
             # Use Google News engine
             response = await client.get(
                 "https://serpapi.com/search",
-                params={
-                    "q": query,
-                    "api_key": serpapi_key,
-                    "engine": "google_news",
-                    "gl": "us",
-                    "hl": "en",
-                }
+                params=params
             )
             response.raise_for_status()
             data = response.json()
