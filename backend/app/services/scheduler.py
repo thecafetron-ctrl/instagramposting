@@ -49,11 +49,27 @@ async def check_and_post_scheduled():
                 return
             
             now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            today_end = today_start + timedelta(days=1)
             
-            # ONLY process posts that are scheduled - DO NOT auto-generate queue
-            # Queue generation is now ONLY manual via the API endpoint
+            # Check if we need to generate today's queue
+            result = await db.execute(
+                select(ScheduledPost)
+                .where(and_(
+                    ScheduledPost.scheduled_time >= today_start,
+                    ScheduledPost.scheduled_time < today_end
+                ))
+            )
+            today_posts = result.scalars().all()
             
-            # Find pending posts that are due NOW (scheduled_time has passed)
+            # Only auto-generate if NO posts exist for today (pending, posted, or failed)
+            if not today_posts:
+                print("[Scheduler] No posts scheduled for today - generating queue")
+                await auto_generate_daily_queue(db, auto_settings)
+                # Refresh to get new posts
+                await db.commit()
+            
+            # Find the NEXT pending post that is due (scheduled_time has passed)
             result = await db.execute(
                 select(ScheduledPost)
                 .where(and_(
@@ -61,19 +77,22 @@ async def check_and_post_scheduled():
                     ScheduledPost.scheduled_time <= now
                 ))
                 .order_by(ScheduledPost.scheduled_time)
-                .limit(1)  # Process ONLY 1 at a time to be safe
+                .limit(1)  # Only get 1 post
             )
-            due_posts = result.scalars().all()
+            due_post = result.scalar_one_or_none()
             
-            if not due_posts:
+            if not due_post:
                 print("[Scheduler] No posts due right now")
                 return
             
-            print(f"[Scheduler] Found {len(due_posts)} post(s) to process")
+            print(f"[Scheduler] Processing post {due_post.id} scheduled for {due_post.scheduled_time}")
             
-            # Process only ONE post per check cycle
-            scheduled = due_posts[0]
-            await process_scheduled_post(db, scheduled, auto_settings)
+            # Mark as "processing" immediately to prevent duplicate processing
+            due_post.status = "processing"
+            await db.commit()
+            
+            # Process the post
+            await process_scheduled_post(db, due_post, auto_settings)
                 
         except Exception as e:
             print(f"[Scheduler] Error: {e}")
@@ -82,7 +101,11 @@ async def check_and_post_scheduled():
 
 
 async def auto_generate_daily_queue(db: AsyncSession, auto_settings: AutoPostSettings):
-    """Automatically generate today's posting queue based on settings."""
+    """Automatically generate today's posting queue based on settings.
+    
+    Posts are spread EVENLY throughout the day.
+    Example: 3 posts = one at 8am, one at 4pm, one at 12am (8 hour intervals)
+    """
     # Get post counts
     carousel_count = getattr(auto_settings, 'carousel_count', 2) or 2
     news_count = getattr(auto_settings, 'news_count', 1) or 1
@@ -92,26 +115,29 @@ async def auto_generate_daily_queue(db: AsyncSession, auto_settings: AutoPostSet
         print("[Scheduler] No posts configured - carousel_count and news_count both 0")
         return
     
-    # Calculate time distribution
-    equal_distribution = getattr(auto_settings, 'equal_distribution', True)
-    interval_hours = 24 / total_posts
-    
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
+    # Calculate interval between posts (spread over 24 hours)
+    interval_hours = 24.0 / total_posts
+    
     # Build a list of post types to create
     post_types = ["carousel"] * carousel_count + ["news"] * news_count
-    if equal_distribution:
-        random.shuffle(post_types)  # Mix them up for variety
+    
+    # Shuffle to mix carousel and news throughout the day
+    random.shuffle(post_types)
     
     created_count = 0
     
     for i, post_type in enumerate(post_types):
-        # Calculate scheduled time - spread throughout the day
-        scheduled_time = today_start + timedelta(hours=interval_hours * i + interval_hours / 2)
+        # Calculate scheduled time - evenly spread throughout the day
+        # First post at interval_hours/2, then every interval_hours after
+        hours_offset = (interval_hours * i) + (interval_hours / 2)
+        scheduled_time = today_start + timedelta(hours=hours_offset)
         
-        # Skip if the time has already passed (more than 30 min ago)
-        if scheduled_time < now - timedelta(minutes=30):
+        # Skip times that have already passed
+        if scheduled_time < now:
+            print(f"[Scheduler] Skipping past time: {scheduled_time}")
             continue
         
         if post_type == "carousel":
@@ -158,14 +184,15 @@ async def auto_generate_daily_queue(db: AsyncSession, auto_settings: AutoPostSet
         
         db.add(scheduled_post)
         created_count += 1
+        print(f"[Scheduler] Scheduled {post_type} post for {scheduled_time}")
     
     await db.commit()
-    print(f"[Scheduler] Auto-generated {created_count} posts for today")
+    print(f"[Scheduler] Auto-generated {created_count} posts spread over 24 hours")
 
 
 async def process_scheduled_post(db: AsyncSession, scheduled: ScheduledPost, auto_settings: AutoPostSettings):
-    """Process a single scheduled post."""
-    print(f"[Scheduler] Processing scheduled post {scheduled.id}")
+    """Process a single scheduled post. Post should already be marked as 'processing'."""
+    print(f"[Scheduler] Processing scheduled post {scheduled.id} (type: {getattr(scheduled, 'post_type', 'carousel')})")
     
     try:
         # Check if post already exists
