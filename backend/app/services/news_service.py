@@ -390,42 +390,60 @@ def truncate_caption(caption: str, max_length: int = 2000) -> str:
 
 
 async def generate_ai_news_caption(news_item: dict) -> str:
-    """Use OpenAI to generate a detailed, engaging caption about the news."""
+    """
+    Use OpenAI to generate a detailed caption that TELLS THE FULL STORY.
+    Gets info from the source and rewrites in our own words.
+    """
     if not settings.openai_api_key:
         return truncate_caption(generate_news_caption(news_item))
     
     title = news_item.get("title", "")
     snippet = news_item.get("snippet", "")
     source = news_item.get("source", "")
+    link = news_item.get("link", "")
     
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
         
-        prompt = f"""Write a concise Instagram caption about this supply chain/logistics news.
+        prompt = f"""You are writing an Instagram caption for STRUCTURE, a logistics and supply chain insights brand.
 
-NEWS: {title}
-DETAILS: {snippet}
-SOURCE: {source}
+NEWS HEADLINE: {title}
+SOURCE INFO: {snippet}
+SOURCE NAME: {source}
 
-REQUIREMENTS:
-1. Start directly with the content - NO emoji headers
-2. Keep it SHORT - maximum 150 words (Instagram limit)
-3. One paragraph summary of what happened
-4. One paragraph on business impact  
-5. 3-4 bullet points with emojis (📦🚛🏭💰)
-6. End with: Follow @structurelogistics
-7. Add 10 hashtags max
-8. Be factual and professional
+YOUR TASK: Tell the FULL STORY in your own words. Don't just summarize - explain what happened, why it matters, and what it means for businesses.
 
-CRITICAL: Keep under 1500 characters total!
+WRITING STYLE:
+1. Start directly with what happened - NO emoji headers, NO "Breaking news", just dive into the story
+2. Write like a knowledgeable industry insider explaining to a business audience
+3. Use clear, professional language - no hype, no clickbait
+4. Include specific details from the source (numbers, company names, locations)
+5. Explain the context - WHY is this happening? What led to this?
+6. Discuss the implications - What does this mean for supply chains, businesses, and the industry?
 
-Return ONLY the caption text."""
+STRUCTURE YOUR CAPTION:
+- Paragraph 1: What happened (the core news, specific details)
+- Paragraph 2: The context and background (why this is happening)
+- Paragraph 3: What this means for businesses and the industry
+- 3-4 bullet points with key takeaways (use emojis: 📦🚛🏭💰📊🔄)
+- Call to action: "What's your take? Comment below 👇"
+- End with: "Follow @structurelogistics for daily supply chain insights"
+- Add 8-10 relevant hashtags
+
+CRITICAL RULES:
+- Maximum 1800 characters (Instagram limit approaching)
+- Be factual - only include information from the source
+- Write in YOUR OWN WORDS - do not copy directly from source
+- Professional tone, no exclamation marks except in CTA
+- Add line breaks between paragraphs for readability
+
+Return ONLY the caption text, nothing else."""
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=600,
-            temperature=0.5,
+            max_tokens=800,
+            temperature=0.6,
         )
         
         caption = response.choices[0].message.content.strip()
