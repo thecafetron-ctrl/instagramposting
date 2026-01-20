@@ -427,50 +427,67 @@ Return ONLY the number (1, 2, 3, etc.) of the best item. Nothing else."""
         return news_items[0]
 
 
+def truncate_caption(caption: str, max_length: int = 2000) -> str:
+    """Truncate caption to Instagram's limit (2200 chars, we use 2000 for safety)."""
+    if len(caption) <= max_length:
+        return caption
+    
+    # Find a good break point (end of sentence or line)
+    truncated = caption[:max_length]
+    
+    # Try to end at a sentence
+    last_period = truncated.rfind('.')
+    last_newline = truncated.rfind('\n')
+    
+    break_point = max(last_period, last_newline)
+    if break_point > max_length - 500:  # Don't cut too much
+        truncated = truncated[:break_point + 1]
+    
+    return truncated.strip()
+
+
 async def generate_ai_news_caption(news_item: dict) -> str:
     """Use OpenAI to generate a detailed, engaging caption about the news."""
     if not settings.openai_api_key:
-        return generate_news_caption(news_item)
+        return truncate_caption(generate_news_caption(news_item))
     
     title = news_item.get("title", "")
     snippet = news_item.get("snippet", "")
     source = news_item.get("source", "")
-    link = news_item.get("link", "")
     
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
         
-        prompt = f"""Write a comprehensive Instagram caption about this supply chain/logistics news.
+        prompt = f"""Write a concise Instagram caption about this supply chain/logistics news.
 
-NEWS HEADLINE: {title}
+NEWS: {title}
 DETAILS: {snippet}
 SOURCE: {source}
 
-CRITICAL REQUIREMENTS:
-1. DO NOT start with any emoji header like "🚨 NEWS 🚨" - just start directly with the content
-2. First paragraph: Summarize what actually happened based on the details provided. Be accurate and factual.
-3. Second paragraph: Explain what this means for businesses and the logistics industry
-4. Third paragraph: Discuss the broader implications (costs, efficiency, technology, etc)
-5. Use bullet points with emojis for key impacts (📦🚛🏭📊💰)
-6. End with "Follow @structurelogistics for daily industry insights"
-7. Add 15-20 relevant hashtags at the end
-8. Make it 300-400 words total
-9. Use line breaks between paragraphs
-10. Be professional but engaging
-11. Use ACCURATE information from the provided details - don't make things up
+REQUIREMENTS:
+1. Start directly with the content - NO emoji headers
+2. Keep it SHORT - maximum 150 words (Instagram limit)
+3. One paragraph summary of what happened
+4. One paragraph on business impact  
+5. 3-4 bullet points with emojis (📦🚛🏭💰)
+6. End with: Follow @structurelogistics
+7. Add 10 hashtags max
+8. Be factual and professional
 
-Return ONLY the caption text, nothing else."""
+CRITICAL: Keep under 1500 characters total!
+
+Return ONLY the caption text."""
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200,
+            max_tokens=600,
             temperature=0.5,
         )
         
         caption = response.choices[0].message.content.strip()
-        return caption
+        return truncate_caption(caption)
         
     except Exception as e:
         print(f"OpenAI caption generation error: {e}")
-        return generate_news_caption(news_item)
+        return truncate_caption(generate_news_caption(news_item))

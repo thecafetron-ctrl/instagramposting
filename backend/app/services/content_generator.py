@@ -284,13 +284,30 @@ async def generate_carousel_content(
     return result
 
 
+def truncate_caption(caption: str, max_length: int = 2000) -> str:
+    """Truncate caption to Instagram's limit (2200 chars, we use 2000 for safety)."""
+    if len(caption) <= max_length:
+        return caption
+    
+    # Find a good break point
+    truncated = caption[:max_length]
+    last_period = truncated.rfind('.')
+    last_newline = truncated.rfind('\n')
+    
+    break_point = max(last_period, last_newline)
+    if break_point > max_length - 500:
+        truncated = truncated[:break_point + 1]
+    
+    return truncated.strip()
+
+
 def format_caption(caption_data) -> str:
     """Format caption with proper line breaks for Instagram."""
-    if isinstance(caption_data, str):
-        # Already a string, just return it
-        return caption_data
+    result = ""
     
-    if isinstance(caption_data, dict):
+    if isinstance(caption_data, str):
+        result = caption_data
+    elif isinstance(caption_data, dict):
         # New extended format
         hook = caption_data.get("hook", "")
         problem_deep_dive = caption_data.get("problem_deep_dive", caption_data.get("problem", ""))
@@ -313,9 +330,12 @@ def format_caption(caption_data) -> str:
         if cta:
             parts.append(cta)
         
-        return "\n\n".join(parts)
+        result = "\n\n".join(parts)
+    else:
+        result = str(caption_data)
     
-    return str(caption_data)
+    # Always truncate to Instagram's limit
+    return truncate_caption(result)
 
 
 def format_slide_1(slide: dict) -> str:
