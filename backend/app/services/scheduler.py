@@ -500,8 +500,22 @@ def start_scheduler():
         max_instances=1
     )
     
+    # Also run immediately on startup to check if anything is due
+    scheduler.add_job(
+        check_and_post_scheduled,
+        'date',  # Run once immediately
+        id="startup_check",
+        replace_existing=True,
+    )
+    
     scheduler.start()
-    print("[Scheduler] Started - checking every 2 minutes")
+    print("[Scheduler] Started - checking every 2 minutes (initial check scheduled)")
+
+
+async def trigger_manual_check():
+    """Manually trigger a scheduler check (for debugging)."""
+    print("[Scheduler] Manual check triggered")
+    await check_and_post_scheduled()
 
 
 def stop_scheduler():

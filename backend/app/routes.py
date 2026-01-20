@@ -1507,3 +1507,60 @@ async def update_lead_status(
         "status": lead.status,
         "follow_up_date": lead.follow_up_date.isoformat() if lead.follow_up_date else None,
     }
+
+
+# ============= DEBUG ENDPOINTS =============
+
+@router.get("/debug/scheduler")
+async def debug_scheduler(db: AsyncSession = Depends(get_db)):
+    """Debug endpoint to check scheduler status and auto-post settings."""
+    from app.services.scheduler import scheduler
+    
+    # Get auto-post settings
+    result = await db.execute(select(AutoPostSettings).limit(1))
+    settings_row = result.scalar_one_or_none()
+    
+    # Get pending scheduled posts
+    result = await db.execute(
+        select(ScheduledPost)
+        .where(ScheduledPost.status == "pending")
+        .order_by(ScheduledPost.scheduled_time)
+        .limit(10)
+    )
+    pending_posts = result.scalars().all()
+    
+    return {
+        "scheduler_running": scheduler.running,
+        "scheduler_jobs": [
+            {"id": job.id, "next_run": str(job.next_run_time)}
+            for job in scheduler.get_jobs()
+        ],
+        "auto_post_settings": {
+            "exists": settings_row is not None,
+            "enabled": settings_row.enabled if settings_row else False,
+            "carousel_count": getattr(settings_row, 'carousel_count', 2) if settings_row else 2,
+            "news_count": getattr(settings_row, 'news_count', 1) if settings_row else 1,
+        } if settings_row else {"exists": False},
+        "pending_posts_count": len(pending_posts),
+        "pending_posts": [
+            {
+                "id": p.id,
+                "scheduled_time": p.scheduled_time.isoformat() if p.scheduled_time else None,
+                "post_type": getattr(p, 'post_type', 'carousel'),
+                "status": p.status
+            }
+            for p in pending_posts
+        ]
+    }
+
+
+@router.post("/debug/trigger-scheduler")
+async def trigger_scheduler_check():
+    """Manually trigger the scheduler check."""
+    from app.services.scheduler import trigger_manual_check
+    
+    try:
+        await trigger_manual_check()
+        return {"status": "ok", "message": "Scheduler check triggered"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
