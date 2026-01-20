@@ -266,19 +266,90 @@ def generate_news_caption(news_item: dict) -> str:
 
 {snippet}
 
-This is what's happening in the logistics and supply chain industry right now.
+---
 
-Stay informed. Stay ahead.
+Here's what this means for the industry:
 
-Follow @structure for daily industry insights.
+This development is a significant shift in how supply chains and logistics operations are evolving. Companies across the globe are watching closely as these changes could reshape how goods move from manufacturers to consumers.
+
+The implications extend beyond just operational efficiency. We're seeing a fundamental transformation in:
+
+📦 Inventory management strategies
+🚛 Transportation and freight networks  
+🏭 Warehouse automation systems
+📊 Real-time tracking and visibility
+💰 Cost structures across the supply chain
+
+For businesses that adapt quickly, this represents an opportunity to gain competitive advantage. For those that don't, it could mean falling behind in an increasingly fast-paced market.
 
 ---
 
-💬 What are your thoughts on this development?
+At STRUCTURE, we help logistics companies navigate these exact challenges. Our AI-powered solutions are designed to turn industry disruptions into operational advantages.
+
+Whether it's optimizing routes, predicting demand, or automating warehouse operations – we're building the technology that keeps supply chains moving.
+
+---
+
+💬 What's your take on this news?
+How is your company adapting to these changes?
 Drop a comment below 👇
 
-{source if source else ''}
+📌 Save this post for reference
+🔔 Follow @structurelogistics for daily industry insights
 
-#supplychain #logistics #news #freight #shipping #transportation #industry #business #supplychain management #logisticsnews #freightnews #shippingnews #industrynews #breakingnews #supplychainnews
+{f'Source: {source}' if source else ''}
+
+#supplychain #logistics #supplychainnews #logisticsnews #freight #shipping #transportation #warehouseautomation #supplychain management #businessnews #industrynews #ecommerce #lastmiledelivery #freighttech #logisticstech #ai #automation #futureoflogistics #supplychainmanagement #operations #businessgrowth #innovation #disruption #technology
 """
     return caption.strip()
+
+
+async def generate_ai_news_caption(news_item: dict) -> str:
+    """Use OpenAI to generate a detailed, engaging caption about the news."""
+    if not settings.openai_api_key:
+        return generate_news_caption(news_item)
+    
+    title = news_item.get("title", "")
+    snippet = news_item.get("snippet", "")
+    source = news_item.get("source", "")
+    category = news_item.get("category", "SUPPLY CHAIN")
+    
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        
+        prompt = f"""Write a comprehensive Instagram caption about this supply chain/logistics news.
+
+NEWS HEADLINE: {title}
+DETAILS: {snippet}
+SOURCE: {source}
+CATEGORY: {category}
+
+Requirements:
+1. Start with "🚨 {category} NEWS 🚨" and the headline
+2. Explain what this news actually means in 2-3 detailed paragraphs
+3. Discuss the implications for the logistics industry
+4. Include specific impacts on: shipping, warehousing, costs, technology
+5. Add a section about how AI and automation relate to this
+6. End with a call to action asking for thoughts
+7. Include "Follow @structurelogistics for daily industry insights"
+8. Add relevant hashtags at the end (20+ hashtags)
+9. Make it 400-500 words total
+10. Use line breaks between paragraphs
+11. Include emojis strategically (📦🚛🏭📊💰 etc)
+12. Sound professional but engaging
+
+Return ONLY the caption, no explanations."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1500,
+            temperature=0.7,
+        )
+        
+        caption = response.choices[0].message.content.strip()
+        return caption
+        
+    except Exception as e:
+        print(f"OpenAI caption generation error: {e}")
+        return generate_news_caption(news_item)

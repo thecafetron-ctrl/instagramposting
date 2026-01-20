@@ -37,7 +37,7 @@ from app.services.topic_discovery import discover_fresh_topic, record_used_topic
 from app.services.content_generator import generate_carousel_content
 from app.services.image_renderer import get_renderer
 from app.services.instagram_poster import post_carousel_to_instagram, verify_access_token
-from app.services.news_service import search_news_serpapi, get_latest_news, generate_news_caption, generate_hook_headline
+from app.services.news_service import search_news_serpapi, get_latest_news, generate_news_caption, generate_hook_headline, generate_ai_news_caption
 from app.services.news_renderer import render_news_post
 from app.config import get_settings
 
@@ -944,16 +944,14 @@ async def generate_news_post(
             # Generate hook headline using AI
             headline = await generate_hook_headline(request.custom_headline, "")
             category = request.category or "SUPPLY CHAIN"
-            caption = f"""🚨 {category} NEWS 🚨
-
-{headline}
-
-Stay informed. Stay ahead.
-
-Follow @structure for daily industry insights.
-
-#supplychain #logistics #news #freight #shipping #industry
-"""
+            # Create a news item for AI caption generation
+            custom_news_item = {
+                "title": request.custom_headline,
+                "snippet": "",
+                "source": "",
+                "category": category,
+            }
+            caption = await generate_ai_news_caption(custom_news_item)
         else:
             # Fetch latest news
             news = await search_news_serpapi()
@@ -965,7 +963,8 @@ Follow @structure for daily industry insights.
             # Generate engaging hook headline using AI
             headline = await generate_hook_headline(news_item["title"], news_item.get("snippet", ""))
             category = request.category or news_item.get("category", "SUPPLY CHAIN")
-            caption = generate_news_caption(news_item)
+            # Generate detailed AI caption with full news info
+            caption = await generate_ai_news_caption(news_item)
         
         # Render the news post image (async - fetches Unsplash image)
         image_path = await render_news_post(

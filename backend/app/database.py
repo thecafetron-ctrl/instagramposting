@@ -21,7 +21,6 @@ def get_engine():
     global _engine
     if _engine is None and settings.database_url:
         try:
-            # For asyncpg with Neon, SSL is handled via the URL parameter
             _engine = create_async_engine(
                 settings.database_url,
                 echo=True,
@@ -63,8 +62,8 @@ async def init_db():
         return False
     
     try:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         _initialized = True
         print("✓ Database tables created successfully")
         return True
