@@ -36,7 +36,7 @@ from app.design_templates import (
 from app.services.topic_discovery import discover_fresh_topic, record_used_topic
 from app.services.content_generator import generate_carousel_content
 from app.services.image_renderer import get_renderer
-from app.services.instagram_poster import post_carousel_to_instagram, verify_access_token
+from app.services.instagram_poster import post_carousel_to_instagram, post_single_image_to_instagram, verify_access_token
 from app.services.news_service import search_news_serpapi, get_latest_news, generate_news_caption, generate_hook_headline, generate_ai_news_caption, select_most_viral_topic
 from app.services.news_renderer import render_news_post
 from app.config import get_settings
@@ -814,7 +814,8 @@ async def post_to_instagram(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Post a generated carousel to Instagram using the Graph API.
+    Post a generated carousel OR single image to Instagram using the Graph API.
+    Automatically detects news posts (single image) vs carousels.
     """
     # Get the post
     result = await db.execute(
@@ -825,44 +826,56 @@ async def post_to_instagram(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     
-    # Collect all image paths (slides 1-4)
-    image_paths = [
-        post.slide_1_image,
-        post.slide_2_image,
-        post.slide_3_image,
-        post.slide_4_image
-    ]
-    
-    # Add any additional slides from metadata (slides 5+)
-    if post.metadata_json and "extra_images" in post.metadata_json:
-        extra_images = post.metadata_json["extra_images"]
-        slide_count = post.metadata_json.get("slide_count", 4)
-        for i in range(5, slide_count + 1):
-            img_key = f"slide_{i}_image"
-            if img_key in extra_images and extra_images[img_key]:
-                image_paths.append(extra_images[img_key])
-    
-    # Filter out None values
-    image_paths = [p for p in image_paths if p]
-    
-    if len(image_paths) < 2:
-        raise HTTPException(
-            status_code=400, 
-            detail="Need at least 2 images for a carousel"
-        )
-    
     # Determine base URL for serving images
-    # Use provided URL or try to get from environment
     import os
     base_url = request.base_url or os.environ.get("PUBLIC_URL", "https://instagramposting-production-4e91.up.railway.app")
     
-    # Post to Instagram
-    ig_result = await post_carousel_to_instagram(
-        image_paths=image_paths,
-        caption=post.caption,
-        hashtags=post.hashtags,
-        base_url=base_url
-    )
+    # Check if this is a news post (single image)
+    is_news_post = post.metadata_json and post.metadata_json.get("post_type") == "news"
+    
+    if is_news_post:
+        # Single image post for news
+        if not post.slide_1_image:
+            raise HTTPException(status_code=400, detail="No image found for news post")
+        
+        # Build full path
+        image_path = f"backend/generated_images/{post.slide_1_image}"
+        
+        ig_result = await post_single_image_to_instagram(
+            image_path=image_path,
+            caption=post.caption,
+            hashtags=post.hashtags,
+            base_url=base_url
+        )
+    else:
+        # Carousel post
+        # Collect all image paths (slides 1-4)
+        image_paths = []
+        for img in [post.slide_1_image, post.slide_2_image, post.slide_3_image, post.slide_4_image]:
+            if img:
+                image_paths.append(f"backend/generated_images/{img}")
+        
+        # Add any additional slides from metadata (slides 5+)
+        if post.metadata_json and "extra_images" in post.metadata_json:
+            extra_images = post.metadata_json["extra_images"]
+            slide_count = post.metadata_json.get("slide_count", 4)
+            for i in range(5, slide_count + 1):
+                img_key = f"slide_{i}_image"
+                if img_key in extra_images and extra_images[img_key]:
+                    image_paths.append(f"backend/generated_images/{extra_images[img_key]}")
+        
+        if len(image_paths) < 2:
+            raise HTTPException(
+                status_code=400, 
+                detail="Need at least 2 images for a carousel"
+            )
+        
+        ig_result = await post_carousel_to_instagram(
+            image_paths=image_paths,
+            caption=post.caption,
+            hashtags=post.hashtags,
+            base_url=base_url
+        )
     
     return {
         "post_id": post.id,

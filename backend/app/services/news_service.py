@@ -337,52 +337,35 @@ async def get_latest_news(count: int = 5) -> list[dict]:
 
 
 def generate_news_caption(news_item: dict) -> str:
-    """Generate Instagram caption for news post."""
+    """Generate Instagram caption for news post - no emoji header."""
     title = news_item.get("title", "")
     snippet = news_item.get("snippet", "")
     source = news_item.get("source", "")
-    category = news_item.get("category", "SUPPLY CHAIN")
     
-    caption = f"""🚨 {category} NEWS 🚨
+    caption = f"""{snippet}
 
-{title}
+This development is reshaping how supply chains and logistics operations evolve globally. Companies are watching closely as these changes affect how goods move from manufacturers to consumers.
 
-{snippet}
+The implications go beyond operational efficiency:
 
----
+📦 Inventory management strategies are shifting
+🚛 Transportation networks are adapting  
+🏭 Warehouse automation is accelerating
+📊 Real-time visibility is becoming essential
+💰 Cost structures are being restructured
 
-Here's what this means for the industry:
+For businesses that move quickly, this is an opportunity. For those that don't adapt, it means falling behind.
 
-This development is a significant shift in how supply chains and logistics operations are evolving. Companies across the globe are watching closely as these changes could reshape how goods move from manufacturers to consumers.
+At STRUCTURE, we help logistics companies navigate these challenges with AI-powered solutions that turn disruption into advantage.
 
-The implications extend beyond just operational efficiency. We're seeing a fundamental transformation in:
-
-📦 Inventory management strategies
-🚛 Transportation and freight networks  
-🏭 Warehouse automation systems
-📊 Real-time tracking and visibility
-💰 Cost structures across the supply chain
-
-For businesses that adapt quickly, this represents an opportunity to gain competitive advantage. For those that don't, it could mean falling behind in an increasingly fast-paced market.
-
----
-
-At STRUCTURE, we help logistics companies navigate these exact challenges. Our AI-powered solutions are designed to turn industry disruptions into operational advantages.
-
-Whether it's optimizing routes, predicting demand, or automating warehouse operations – we're building the technology that keeps supply chains moving.
-
----
-
-💬 What's your take on this news?
-How is your company adapting to these changes?
+💬 What's your take on this?
 Drop a comment below 👇
 
-📌 Save this post for reference
-🔔 Follow @structurelogistics for daily industry insights
+Follow @structurelogistics for daily industry insights
 
 {f'Source: {source}' if source else ''}
 
-#supplychain #logistics #supplychainnews #logisticsnews #freight #shipping #transportation #warehouseautomation #supplychain management #businessnews #industrynews #ecommerce #lastmiledelivery #freighttech #logisticstech #ai #automation #futureoflogistics #supplychainmanagement #operations #businessgrowth #innovation #disruption #technology
+#supplychain #logistics #supplychainnews #freight #shipping #transportation #warehouseautomation #businessnews #industrynews #ecommerce #lastmiledelivery #freighttech #logisticstech #automation #supplychainmanagement #operations #innovation #technology
 """
     return caption.strip()
 
@@ -395,7 +378,7 @@ async def generate_ai_news_caption(news_item: dict) -> str:
     title = news_item.get("title", "")
     snippet = news_item.get("snippet", "")
     source = news_item.get("source", "")
-    category = news_item.get("category", "SUPPLY CHAIN")
+    link = news_item.get("link", "")
     
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -405,29 +388,27 @@ async def generate_ai_news_caption(news_item: dict) -> str:
 NEWS HEADLINE: {title}
 DETAILS: {snippet}
 SOURCE: {source}
-CATEGORY: {category}
 
-Requirements:
-1. Start with "🚨 {category} NEWS 🚨" and the headline
-2. Explain what this news actually means in 2-3 detailed paragraphs
-3. Discuss the implications for the logistics industry
-4. Include specific impacts on: shipping, warehousing, costs, technology
-5. Add a section about how AI and automation relate to this
-6. End with a call to action asking for thoughts
-7. Include "Follow @structurelogistics for daily industry insights"
-8. Add relevant hashtags at the end (20+ hashtags)
-9. Make it 400-500 words total
-10. Use line breaks between paragraphs
-11. Include emojis strategically (📦🚛🏭📊💰 etc)
-12. Sound professional but engaging
+CRITICAL REQUIREMENTS:
+1. DO NOT start with any emoji header like "🚨 NEWS 🚨" - just start directly with the content
+2. First paragraph: Summarize what actually happened based on the details provided. Be accurate and factual.
+3. Second paragraph: Explain what this means for businesses and the logistics industry
+4. Third paragraph: Discuss the broader implications (costs, efficiency, technology, etc)
+5. Use bullet points with emojis for key impacts (📦🚛🏭📊💰)
+6. End with "Follow @structurelogistics for daily industry insights"
+7. Add 15-20 relevant hashtags at the end
+8. Make it 300-400 words total
+9. Use line breaks between paragraphs
+10. Be professional but engaging
+11. Use ACCURATE information from the provided details - don't make things up
 
-Return ONLY the caption, no explanations."""
+Return ONLY the caption text, nothing else."""
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1500,
-            temperature=0.7,
+            max_tokens=1200,
+            temperature=0.5,
         )
         
         caption = response.choices[0].message.content.strip()

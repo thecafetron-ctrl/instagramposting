@@ -321,6 +321,110 @@ async def post_carousel_to_instagram(
         }
 
 
+async def post_single_image_to_instagram(
+    image_path: str,
+    caption: str,
+    hashtags: str,
+    base_url: str = "http://localhost:8000",
+    access_token: str = None
+) -> dict:
+    """
+    Post a single image to Instagram (for news posts).
+    
+    Args:
+        image_path: Local path to the image
+        caption: The post caption
+        hashtags: Hashtags to append to caption
+        base_url: Base URL where images are served
+        access_token: Instagram access token
+    
+    Returns:
+        dict with status, message, and instagram_post_id if successful
+    """
+    access_token = access_token or settings.instagram_access_token
+    
+    if not access_token:
+        return {
+            "status": "error",
+            "message": "No Instagram access token configured"
+        }
+    
+    # Get user ID
+    user_id = await get_instagram_user_id(access_token)
+    if not user_id:
+        return {
+            "status": "error",
+            "message": "Failed to get Instagram user ID. Access token may be invalid."
+        }
+    
+    # Check image exists
+    if not image_path or not os.path.exists(image_path):
+        return {
+            "status": "error",
+            "message": f"Image not found: {image_path}"
+        }
+    
+    # Get public URL for the image
+    image_url = await upload_image_to_hosting(image_path, base_url)
+    
+    # Combine caption and hashtags
+    full_caption = f"{caption}\n\n{hashtags}" if hashtags else caption
+    
+    # Create single image container (NOT a carousel item)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{GRAPH_API_BASE}/{user_id}/media",
+            params={
+                "image_url": image_url,
+                "caption": full_caption,
+                "access_token": access_token,
+            }
+        )
+        
+        print(f"Single image container response: {response.status_code} - {response.text[:500]}")
+        
+        if response.status_code != 200:
+            return {
+                "status": "error",
+                "message": f"Failed to create media container. URL: {image_url}. Error: {response.text}"
+            }
+        
+        container_id = response.json().get("id")
+    
+    if not container_id:
+        return {
+            "status": "error",
+            "message": "Failed to get container ID"
+        }
+    
+    # Wait for container to be ready
+    ready = await wait_for_container_ready(container_id, access_token)
+    if not ready:
+        return {
+            "status": "error",
+            "message": "Media container failed to process"
+        }
+    
+    # Publish the image
+    published_id = await publish_media(
+        user_id=user_id,
+        container_id=container_id,
+        access_token=access_token
+    )
+    
+    if published_id:
+        return {
+            "status": "success",
+            "message": "Image posted successfully!",
+            "instagram_post_id": published_id
+        }
+    else:
+        return {
+            "status": "error",
+            "message": "Failed to publish image"
+        }
+
+
 async def verify_access_token(access_token: str = None) -> dict:
     """Verify the access token is valid and get account info."""
     access_token = access_token or settings.instagram_access_token
