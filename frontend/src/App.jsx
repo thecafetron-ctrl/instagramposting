@@ -58,6 +58,14 @@ function App() {
   const [editingLead, setEditingLead] = useState(null)
   const [leadFilter, setLeadFilter] = useState('')
 
+  // Post type state (carousel vs news)
+  const [postType, setPostType] = useState('carousel') // 'carousel' or 'news'
+  const [newsArticles, setNewsArticles] = useState([])
+  const [selectedNewsIndex, setSelectedNewsIndex] = useState(0)
+  const [customHeadline, setCustomHeadline] = useState('')
+  const [newsCategory, setNewsCategory] = useState('SUPPLY CHAIN')
+  const [generatedNewsPost, setGeneratedNewsPost] = useState(null)
+
   useEffect(() => {
     fetchContentTemplates()
     fetchColorThemes()
@@ -316,6 +324,59 @@ function App() {
     }
   }
 
+  // News functions
+  const fetchNewsArticles = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/news/latest?count=10`)
+      const data = await res.json()
+      if (data.news) {
+        setNewsArticles(data.news)
+      }
+    } catch (err) {
+      console.error('Failed to fetch news:', err)
+    }
+  }
+
+  const generateNewsPost = async () => {
+    setLoading(true)
+    setError(null)
+    setGeneratedNewsPost(null)
+
+    try {
+      const body = {
+        category: newsCategory,
+      }
+      
+      // Use custom headline or selected news article
+      if (customHeadline) {
+        body.custom_headline = customHeadline
+      } else if (newsArticles.length > 0) {
+        body.custom_headline = newsArticles[selectedNewsIndex]?.title
+        body.category = newsArticles[selectedNewsIndex]?.category || newsCategory
+      }
+
+      const res = await fetch(`${API_BASE}/news/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.detail || 'News generation failed')
+      }
+
+      const post = await res.json()
+      setGeneratedNewsPost(post)
+      fetchPosts()
+      setCustomHeadline('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const generatePost = async () => {
     setLoading(true)
     setError(null)
@@ -407,8 +468,34 @@ function App() {
         {currentPage === 'generator' && (
           <div className="generator">
             <section className="controls-section">
-              <h2 className="section-title">Generate Carousel</h2>
+              <h2 className="section-title">Generate Post</h2>
 
+              {/* Post Type Selector */}
+              <div className="post-type-selector">
+                <label className="form-label">Post Type</label>
+                <div className="post-type-buttons">
+                  <button
+                    className={`post-type-btn ${postType === 'carousel' ? 'active' : ''}`}
+                    onClick={() => setPostType('carousel')}
+                  >
+                    <span className="post-type-icon">📊</span>
+                    <span className="post-type-name">Information Carousel</span>
+                    <span className="post-type-desc">4-10 slide educational content</span>
+                  </button>
+                  <button
+                    className={`post-type-btn ${postType === 'news' ? 'active' : ''}`}
+                    onClick={() => { setPostType('news'); fetchNewsArticles(); }}
+                  >
+                    <span className="post-type-icon">📰</span>
+                    <span className="post-type-name">News Post</span>
+                    <span className="post-type-desc">Single image with headline</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* CAROUSEL POST OPTIONS */}
+              {postType === 'carousel' && (
+              <>
               {/* Visual Customization Section */}
               <div className="visual-section">
                 <h3 className="subsection-title">Visual Style</h3>
@@ -552,9 +639,93 @@ function App() {
                     Generating...
                   </>
                 ) : (
-                  'Generate Post'
+                  'Generate Carousel'
                 )}
               </button>
+              </>
+              )}
+
+              {/* NEWS POST OPTIONS */}
+              {postType === 'news' && (
+              <>
+              <div className="news-section">
+                <h3 className="subsection-title">📰 News Post Settings</h3>
+                
+                {/* News Category */}
+                <div className="selector-group">
+                  <label className="form-label">Category</label>
+                  <div className="category-buttons">
+                    {['SUPPLY CHAIN', 'LOGISTICS', 'FREIGHT', 'SHIPPING', 'TECHNOLOGY', 'BREAKING'].map(cat => (
+                      <button
+                        key={cat}
+                        className={`category-btn ${newsCategory === cat ? 'active' : ''}`}
+                        onClick={() => setNewsCategory(cat)}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Headline or Select from News */}
+                <div className="selector-group">
+                  <label className="form-label">Headline</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Enter custom headline or select from latest news below..."
+                    value={customHeadline}
+                    onChange={(e) => setCustomHeadline(e.target.value)}
+                  />
+                </div>
+
+                {/* Latest News Articles */}
+                <div className="selector-group">
+                  <div className="news-header">
+                    <label className="form-label">Or Select from Latest News</label>
+                    <button className="btn btn-sm" onClick={fetchNewsArticles}>
+                      🔄 Refresh
+                    </button>
+                  </div>
+                  <div className="news-articles">
+                    {newsArticles.length === 0 ? (
+                      <div className="news-empty">
+                        <p>Click "Refresh" to load latest supply chain news</p>
+                      </div>
+                    ) : (
+                      newsArticles.map((article, idx) => (
+                        <div
+                          key={idx}
+                          className={`news-article ${selectedNewsIndex === idx && !customHeadline ? 'selected' : ''}`}
+                          onClick={() => { setSelectedNewsIndex(idx); setCustomHeadline(''); }}
+                        >
+                          <span className="news-category-tag">{article.category}</span>
+                          <h4 className="news-title">{article.title}</h4>
+                          {article.snippet && <p className="news-snippet">{article.snippet.slice(0, 120)}...</p>}
+                          <span className="news-source">{article.source} {article.date && `• ${article.date}`}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="btn btn-primary btn-lg generate-btn"
+                onClick={generateNewsPost}
+                disabled={loading || (!customHeadline && newsArticles.length === 0)}
+              >
+                {loading ? (
+                  <>
+                    <span className="spinner"></span>
+                    Generating...
+                  </>
+                ) : (
+                  '📰 Generate News Post'
+                )}
+              </button>
+              </>
+              )}
 
               {error && (
                 <div className="error-message">
@@ -620,6 +791,53 @@ function App() {
                     onClick={() => schedulePost({ post_id: generatedPost.id })}
                   >
                     📅 Schedule Post
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {/* NEWS POST RESULT */}
+            {generatedNewsPost && (
+              <section className="result-section news-result animate-fade-in">
+                <div className="result-header">
+                  <h2 className="section-title">📰 Generated News Post</h2>
+                  <span className="badge badge-success">Post #{generatedNewsPost.id}</span>
+                </div>
+
+                <div className="news-post-preview">
+                  <div className="news-category-display">
+                    <span className="category-tag">{generatedNewsPost.category}</span>
+                  </div>
+                  <h3 className="news-headline-display">{generatedNewsPost.headline}</h3>
+                  
+                  {generatedNewsPost.image && (
+                    <div className="news-image-preview">
+                      <img 
+                        src={`/images/${generatedNewsPost.image}`} 
+                        alt="News Post"
+                        className="news-preview-img"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="caption-section">
+                  <div className="caption-header">
+                    <h3>Caption</h3>
+                    <button className="btn btn-secondary" onClick={() => copyToClipboard(generatedNewsPost.caption)}>
+                      Copy
+                    </button>
+                  </div>
+                  <div className="caption-text" dangerouslySetInnerHTML={{ __html: generatedNewsPost.caption?.replace(/\n/g, '<br />') }}></div>
+                </div>
+
+                <div className="instagram-actions">
+                  <button
+                    className="btn btn-primary btn-lg instagram-btn"
+                    onClick={() => postToInstagram(generatedNewsPost.id)}
+                    disabled={postingToIG}
+                  >
+                    {postingToIG ? 'Posting...' : '📸 Post to Instagram'}
                   </button>
                 </div>
               </section>

@@ -37,6 +37,8 @@ from app.services.topic_discovery import discover_fresh_topic, record_used_topic
 from app.services.content_generator import generate_carousel_content
 from app.services.image_renderer import get_renderer
 from app.services.instagram_poster import post_carousel_to_instagram, verify_access_token
+from app.services.news_service import search_news_serpapi, get_latest_news, generate_news_caption
+from app.services.news_renderer import render_news_post
 from app.config import get_settings
 
 router = APIRouter()
@@ -54,6 +56,13 @@ class GenerateRequest(BaseModel):
     topic: Optional[str] = None  # If provided, use this topic instead of discovering
     allow_reuse: bool = False
     render_images: bool = True
+
+
+class NewsPostRequest(BaseModel):
+    """Request for generating a news post."""
+    custom_headline: Optional[str] = None  # If provided, use this instead of fetching news
+    category: Optional[str] = None  # Category label (auto-detected if not provided)
+    accent_words: Optional[List[str]] = None  # Words to highlight in cyan
 
 
 class GenerateResponse(BaseModel):
@@ -893,6 +902,145 @@ async def test_instagram_post(
         ],
         "caption_preview": post.caption[:200] + "..." if len(post.caption) > 200 else post.caption
     }
+
+
+# ============================================================================
+# NEWS POST ENDPOINTS
+# ============================================================================
+
+@router.get("/news/latest")
+async def get_news_articles(count: int = 5):
+    """
+    Fetch latest supply chain and logistics news articles.
+    Returns list of news items that can be used for news posts.
+    """
+    try:
+        news = await get_latest_news(count=count)
+        return {
+            "status": "success",
+            "news": news,
+            "count": len(news)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "news": []
+        }
+
+
+@router.post("/news/generate")
+async def generate_news_post(
+    request: NewsPostRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a news post image.
+    Either fetches latest news or uses custom headline.
+    """
+    try:
+        # Get headline - either custom or from news API
+        if request.custom_headline:
+            headline = request.custom_headline
+            category = request.category or "SUPPLY CHAIN"
+            caption = f"""🚨 {category} NEWS 🚨
+
+{headline}
+
+Stay informed. Stay ahead.
+
+Follow @structure for daily industry insights.
+
+#supplychain #logistics #news #freight #shipping #industry
+"""
+        else:
+            # Fetch latest news
+            news = await search_news_serpapi()
+            if not news:
+                raise HTTPException(status_code=500, detail="Failed to fetch news")
+            
+            # Use first news item
+            news_item = news[0]
+            headline = news_item["title"]
+            category = request.category or news_item.get("category", "SUPPLY CHAIN")
+            caption = generate_news_caption(news_item)
+        
+        # Render the news post image
+        image_path = render_news_post(
+            headline=headline,
+            category=category,
+            accent_words=request.accent_words,
+        )
+        
+        # Extract just the filename for the URL
+        image_filename = os.path.basename(image_path)
+        
+        # Save to database
+        post = Post(
+            topic=headline,
+            template_id="news_post",
+            slide_1_text=headline,
+            slide_2_text="",
+            slide_3_text="",
+            slide_4_text="",
+            caption=caption,
+            hashtags="#supplychain #logistics #news #freight #shipping",
+            slide_1_image=image_filename,
+            slide_2_image=None,
+            slide_3_image=None,
+            slide_4_image=None,
+            metadata_json={
+                "post_type": "news",
+                "category": category,
+            }
+        )
+        
+        db.add(post)
+        await db.commit()
+        await db.refresh(post)
+        
+        return {
+            "status": "success",
+            "post_type": "news",
+            "id": post.id,
+            "headline": headline,
+            "category": category,
+            "image": image_filename,
+            "caption": caption,
+            "created_at": post.created_at.isoformat() if post.created_at else None,
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate news post: {str(e)}")
+
+
+@router.get("/news/preview")
+async def preview_news_post(
+    headline: str,
+    category: str = "SUPPLY CHAIN",
+):
+    """
+    Preview a news post without saving.
+    Just generates the image and returns the path.
+    """
+    try:
+        image_path = render_news_post(
+            headline=headline,
+            category=category,
+        )
+        
+        image_filename = os.path.basename(image_path)
+        
+        return {
+            "status": "success",
+            "image": image_filename,
+            "headline": headline,
+            "category": category,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate preview: {str(e)}")
 
 
 # ============================================================================
