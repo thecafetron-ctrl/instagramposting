@@ -136,7 +136,11 @@ async def auto_generate_daily_queue(db: AsyncSession, auto_settings: AutoPostSet
             color_theme = auto_settings.default_color_theme or "random"
             texture = auto_settings.default_texture or "random"
             layout = auto_settings.default_layout or "random"
-            slide_count = auto_settings.default_slide_count or 4
+            
+            # Handle random slide count (0 or None means random)
+            slide_count = auto_settings.default_slide_count
+            if not slide_count or slide_count == 0:
+                slide_count = random.randint(4, 10)
             
             scheduled_post = ScheduledPost(
                 scheduled_time=scheduled_time,
@@ -149,8 +153,11 @@ async def auto_generate_daily_queue(db: AsyncSession, auto_settings: AutoPostSet
                 slide_count=slide_count
             )
         else:
-            # News post settings
+            # News post settings - handle random color
             news_accent = getattr(auto_settings, 'news_accent_color', 'cyan') or 'cyan'
+            if news_accent == 'random':
+                news_accent = random.choice(['cyan', 'blue', 'green', 'orange', 'red', 'yellow', 'pink', 'purple'])
+            
             news_time = getattr(auto_settings, 'news_time_range', '1d') or '1d'
             news_auto = getattr(auto_settings, 'news_auto_select', True)
             if news_auto is None:
@@ -288,6 +295,11 @@ async def generate_news_post_for_schedule(db: AsyncSession, scheduled: Scheduled
     
     # Get news settings
     accent_color = getattr(scheduled, 'news_accent_color', None) or getattr(auto_settings, 'news_accent_color', 'cyan') or 'cyan'
+    
+    # Handle random color
+    if accent_color == 'random':
+        accent_color = random.choice(['cyan', 'blue', 'green', 'orange', 'red', 'yellow', 'pink', 'purple'])
+    
     time_range = getattr(scheduled, 'news_time_range', None) or getattr(auto_settings, 'news_time_range', '1d') or '1d'
     auto_select = getattr(scheduled, 'news_auto_select', None)
     if auto_select is None:
@@ -372,7 +384,11 @@ async def generate_carousel_post_for_schedule(db: AsyncSession, scheduled: Sched
     color_theme = scheduled.color_theme or auto_settings.default_color_theme or "black"
     texture = scheduled.texture or auto_settings.default_texture or "marble"
     layout = scheduled.layout or auto_settings.default_layout or "centered"
-    slide_count = scheduled.slide_count or auto_settings.default_slide_count or 4
+    slide_count = scheduled.slide_count or auto_settings.default_slide_count
+    
+    # Handle random slide count
+    if not slide_count or slide_count == 0:
+        slide_count = random.randint(4, 10)
     
     # Randomize if set to random
     if template_id == "random":

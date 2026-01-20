@@ -1394,31 +1394,57 @@ function AutoPostPage({
         <div className="distribution-grid">
           <div className="distribution-item">
             <label className="form-label">📸 Carousels per day</label>
-            <div className="count-buttons">
-              {[0, 1, 2, 3, 4, 5].map((num) => (
-                <button
-                  key={num}
-                  className={`count-btn ${localSettings.carousel_count === num ? 'selected' : ''}`}
-                  onClick={() => setLocalSettings({ ...localSettings, carousel_count: num, posts_per_day: num + localSettings.news_count })}
-                >
-                  {num}
-                </button>
-              ))}
+            <div className="count-input-row">
+              <input
+                type="number"
+                className="form-input count-input"
+                min="0"
+                max="20"
+                value={localSettings.carousel_count}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(20, parseInt(e.target.value) || 0))
+                  setLocalSettings({ ...localSettings, carousel_count: val, posts_per_day: val + localSettings.news_count })
+                }}
+              />
+              <div className="quick-btns">
+                {[0, 1, 2, 3, 5, 10].map((num) => (
+                  <button
+                    key={num}
+                    className={`quick-btn ${localSettings.carousel_count === num ? 'selected' : ''}`}
+                    onClick={() => setLocalSettings({ ...localSettings, carousel_count: num, posts_per_day: num + localSettings.news_count })}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
           <div className="distribution-item">
             <label className="form-label">📰 News Posts per day</label>
-            <div className="count-buttons">
-              {[0, 1, 2, 3, 4, 5].map((num) => (
-                <button
-                  key={num}
-                  className={`count-btn ${localSettings.news_count === num ? 'selected' : ''}`}
-                  onClick={() => setLocalSettings({ ...localSettings, news_count: num, posts_per_day: localSettings.carousel_count + num })}
-                >
-                  {num}
-                </button>
-              ))}
+            <div className="count-input-row">
+              <input
+                type="number"
+                className="form-input count-input"
+                min="0"
+                max="20"
+                value={localSettings.news_count}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(20, parseInt(e.target.value) || 0))
+                  setLocalSettings({ ...localSettings, news_count: val, posts_per_day: localSettings.carousel_count + val })
+                }}
+              />
+              <div className="quick-btns">
+                {[0, 1, 2, 3, 5, 10].map((num) => (
+                  <button
+                    key={num}
+                    className={`quick-btn ${localSettings.news_count === num ? 'selected' : ''}`}
+                    onClick={() => setLocalSettings({ ...localSettings, news_count: num, posts_per_day: localSettings.carousel_count + num })}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -1506,9 +1532,10 @@ function AutoPostPage({
             <label className="form-label">Slide Count</label>
             <select
               className="form-select"
-              value={localSettings.default_slide_count}
-              onChange={(e) => setLocalSettings({ ...localSettings, default_slide_count: parseInt(e.target.value) })}
+              value={localSettings.default_slide_count || 0}
+              onChange={(e) => setLocalSettings({ ...localSettings, default_slide_count: parseInt(e.target.value) || null })}
             >
+              <option value="0">Random (4-10)</option>
               {[4, 5, 6, 7, 8, 9, 10].map((n) => (
                 <option key={n} value={n}>{n} slides</option>
               ))}
@@ -1526,6 +1553,13 @@ function AutoPostPage({
           <div className="setting-row">
             <label className="form-label">Highlight Color</label>
             <div className="color-picker-row">
+              <button
+                className={`color-btn random-color ${localSettings.news_accent_color === 'random' ? 'selected' : ''}`}
+                onClick={() => setLocalSettings({ ...localSettings, news_accent_color: 'random' })}
+                title="Random"
+              >
+                🎲
+              </button>
               {['cyan', 'blue', 'green', 'orange', 'red', 'yellow', 'pink', 'purple'].map(color => (
                 <button
                   key={color}

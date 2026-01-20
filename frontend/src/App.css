@@ -1548,6 +1548,48 @@
   gap: 8px;
 }
 
+.count-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.count-input {
+  width: 70px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.quick-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.quick-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quick-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+}
+
+.quick-btn.selected {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
 .count-btn {
   width: 40px;
   height: 40px;
@@ -1609,6 +1651,14 @@
 .color-btn.selected {
   border-color: white;
   box-shadow: 0 0 8px currentColor;
+}
+
+.color-btn.random-color {
+  background: linear-gradient(135deg, #f43f5e, #a855f7, #3b82f6, #22c55e, #eab308);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Full Width Setting Row */
