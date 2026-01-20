@@ -1,17 +1,16 @@
 """
 News Post Renderer - Creates single-image news posts.
 - Square format (1080x1080)
-- Top 60%: Unsplash image related to the news
-- Bottom 40%: MASSIVE ALL CAPS headline with accent colors
-- Brand "STRUCTURE" + logo above the black section
-- Category label with underline
+- Top 58%: Unsplash image related to the news
+- Bottom 42%: MASSIVE ALL CAPS headline
+- STRUCTURE branding
 """
 
 import os
 import uuid
 import httpx
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 from pathlib import Path
 
 from app.config import get_settings
@@ -22,20 +21,20 @@ settings = get_settings()
 WIDTH = 1080
 HEIGHT = 1080
 
-# Layout proportions - MORE space for text
-IMAGE_HEIGHT_RATIO = 0.52  # 52% for image
-TEXT_HEIGHT_RATIO = 0.48   # 48% for text (MUCH BIGGER)
+# Layout - ORIGINAL proportions
+IMAGE_HEIGHT_RATIO = 0.58  # 58% for image
+TEXT_HEIGHT_RATIO = 0.42   # 42% for text
 
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-ACCENT_CYAN = (0, 200, 255)  # Cyan for highlighted words
+ACCENT_CYAN = (0, 200, 255)
 DARK_BG = (12, 12, 18)
 
 # Font paths
 ASSETS_DIR = Path(__file__).parent.parent.parent / "assets"
-FONTS_DIR = ASSETS_DIR / "fonts" / "montserrat"
-LOGO_PATH = ASSETS_DIR / "logo.svg"
+FONTS_DIR = ASSETS_DIR / "fonts" / "Montserrat"
+LOGO_PATH = ASSETS_DIR / "logo.png"
 
 # Output directory
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "generated_images"
@@ -50,42 +49,33 @@ async def fetch_unsplash_image(query: str) -> Image.Image | None:
         print("No Unsplash access key configured")
         return None
     
-    # Build better search query
-    search_terms = []
-    
-    # Extract key concepts from headline
+    # Better search terms
     keywords_map = {
-        "supply chain": "supply chain warehouse logistics",
-        "logistics": "logistics warehouse shipping",
+        "supply chain": "warehouse logistics shipping",
+        "logistics": "warehouse shipping cargo",
         "shipping": "cargo ship container port",
-        "freight": "freight truck cargo transport",
-        "warehouse": "warehouse storage logistics",
-        "port": "shipping port cargo container",
-        "retail": "retail store shopping",
-        "ecommerce": "ecommerce warehouse packages",
-        "technology": "technology business office",
-        "ai": "artificial intelligence technology",
-        "automation": "automation robotics factory",
-        "truck": "semi truck freight highway",
-        "cargo": "cargo container shipping",
-        "delivery": "delivery truck packages",
-        "amazon": "ecommerce warehouse packages",
-        "trade": "international trade shipping port",
-        "tariff": "international trade shipping",
-        "inflation": "business economy finance",
-        "prices": "business economy market",
+        "freight": "freight truck cargo",
+        "warehouse": "warehouse storage",
+        "port": "shipping port container",
+        "retail": "retail store",
+        "ecommerce": "ecommerce warehouse",
+        "technology": "technology business",
+        "ai": "artificial intelligence",
+        "automation": "robotics factory",
+        "truck": "semi truck freight",
+        "cargo": "cargo container",
+        "delivery": "delivery packages",
+        "trade": "international trade",
+        "tariff": "international shipping",
     }
     
     query_lower = query.lower()
+    search_query = "logistics shipping cargo"
+    
     for keyword, search_term in keywords_map.items():
         if keyword in query_lower:
-            search_terms.append(search_term)
+            search_query = search_term
             break
-    
-    if not search_terms:
-        search_terms = ["logistics shipping cargo business"]
-    
-    search_query = search_terms[0]
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -96,15 +86,12 @@ async def fetch_unsplash_image(query: str) -> Image.Image | None:
                     "per_page": 10,
                     "orientation": "landscape",
                 },
-                headers={
-                    "Authorization": f"Client-ID {access_key}"
-                }
+                headers={"Authorization": f"Client-ID {access_key}"}
             )
             response.raise_for_status()
             data = response.json()
             
             results = data.get("results", [])
-            
             if results:
                 import random
                 photo = random.choice(results[:5]) if len(results) >= 5 else results[0]
@@ -113,33 +100,25 @@ async def fetch_unsplash_image(query: str) -> Image.Image | None:
                 if image_url:
                     img_response = await client.get(image_url)
                     img_response.raise_for_status()
-                    img = Image.open(BytesIO(img_response.content))
-                    return img.convert("RGB")
-            
+                    return Image.open(BytesIO(img_response.content)).convert("RGB")
             return None
-            
         except Exception as e:
             print(f"Unsplash API error: {e}")
             return None
 
 
 def create_fallback_background() -> Image.Image:
-    """Create a fallback background if Unsplash fails."""
+    """Create fallback background."""
     img = Image.new("RGB", (WIDTH, int(HEIGHT * IMAGE_HEIGHT_RATIO)), (30, 35, 50))
     draw = ImageDraw.Draw(img)
-    
-    # Add grid pattern
     for x in range(0, WIDTH, 50):
         draw.line([(x, 0), (x, img.height)], fill=(40, 45, 60), width=1)
     for y in range(0, img.height, 50):
         draw.line([(0, y), (WIDTH, y)], fill=(40, 45, 60), width=1)
-    
     return img
 
 
 class NewsPostRenderer:
-    """Renderer for single-image news posts."""
-    
     def __init__(self):
         self.width = WIDTH
         self.height = HEIGHT
@@ -147,102 +126,90 @@ class NewsPostRenderer:
         self._load_logo()
     
     def _load_fonts(self):
-        """Load Montserrat fonts - MASSIVE sizes."""
+        """Load fonts - ACTUALLY EXTRABOLD and HUGE."""
         try:
-            # Brand font - BIGGER
-            self.font_brand = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 36)
-            self.font_brand_large = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 42)
-            # Category font - BIGGER
-            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-SemiBold.ttf"), 28)
-            # Headline fonts - MASSIVE and ULTRA BOLD
-            self.font_headline_xl = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 88)
-            self.font_headline_lg = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 76)
-            self.font_headline_md = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 64)
-            self.font_headline_sm = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 52)
+            # Top left brand
+            self.font_brand_top = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 42)
+            # Category
+            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 32)
+            # STRUCTURE watermark - BIG
+            self.font_structure = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 48)
+            # Headlines - MASSIVE EXTRABOLD
+            self.font_headline_huge = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 120)
+            self.font_headline_xl = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 100)
+            self.font_headline_lg = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 85)
+            self.font_headline_md = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 72)
+            self.font_headline_sm = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 60)
+            print("✓ Loaded ExtraBold fonts successfully")
         except Exception as e:
             print(f"Font loading error: {e}")
-            self.font_brand = ImageFont.load_default()
-            self.font_brand_large = ImageFont.load_default()
+            # Fallback
+            self.font_brand_top = ImageFont.load_default()
             self.font_category = ImageFont.load_default()
+            self.font_structure = ImageFont.load_default()
+            self.font_headline_huge = ImageFont.load_default()
             self.font_headline_xl = ImageFont.load_default()
             self.font_headline_lg = ImageFont.load_default()
             self.font_headline_md = ImageFont.load_default()
             self.font_headline_sm = ImageFont.load_default()
     
     def _load_logo(self):
-        """Load the STRUCTURE logo."""
+        """Load logo."""
         self.logo = None
         try:
-            # Try PNG first
-            logo_png = ASSETS_DIR / "logo.png"
-            if logo_png.exists():
-                self.logo = Image.open(logo_png).convert("RGBA")
+            logo_path = ASSETS_DIR / "logo.png"
+            if logo_path.exists():
+                self.logo = Image.open(logo_path).convert("RGBA")
             else:
-                # Try converting SVG
                 try:
                     import cairosvg
                     logo_svg = ASSETS_DIR / "logo.svg"
                     if logo_svg.exists():
-                        png_data = cairosvg.svg2png(url=str(logo_svg), output_width=120)
+                        png_data = cairosvg.svg2png(url=str(logo_svg), output_width=200)
                         self.logo = Image.open(BytesIO(png_data)).convert("RGBA")
                 except:
                     pass
         except Exception as e:
             print(f"Logo loading error: {e}")
     
-    async def render_news_post(
-        self,
-        headline: str,
-        category: str = "SUPPLY CHAIN",
-        accent_words: list[str] = None,
-    ) -> str:
-        """Render a news post image."""
-        # Create base image
+    async def render_news_post(self, headline: str, category: str = "SUPPLY CHAIN", accent_words: list[str] = None) -> str:
+        """Render news post with MASSIVE text."""
+        # Create base
         img = Image.new("RGB", (self.width, self.height), DARK_BG)
         
-        # Calculate sections
         image_height = int(self.height * IMAGE_HEIGHT_RATIO)
         text_height = self.height - image_height
         
-        # Get Unsplash image
+        # Get image
         unsplash_img = await fetch_unsplash_image(headline)
-        
         if unsplash_img:
-            top_img = self._fit_image_to_area(unsplash_img, self.width, image_height)
+            top_img = self._fit_image(unsplash_img, self.width, image_height)
         else:
             top_img = create_fallback_background()
         
-        # Paste image at top
         img.paste(top_img, (0, 0))
         
-        # Add gradient at bottom of image
-        self._add_gradient_overlay(img, image_height)
+        # Gradient
+        self._add_gradient(img, image_height)
         
         draw = ImageDraw.Draw(img)
         
-        # Draw brand "STRUCTURE NEWS" at top left
-        self._draw_brand(draw)
-        
-        # Draw category with underline at boundary
+        # Draw elements
+        self._draw_top_brand(draw)
         self._draw_category(draw, category, image_height)
-        
-        # Draw STRUCTURE + logo above black section
-        self._draw_structure_branding(img, draw, image_height)
-        
-        # Draw MASSIVE headline in bottom section
-        self._draw_headline(draw, headline, image_height, text_height, accent_words)
+        self._draw_structure_watermark(img, draw, image_height)
+        self._draw_headline_massive(draw, headline, image_height, text_height, accent_words)
         
         # Save
         post_id = uuid.uuid4().hex[:8]
         filename = f"{post_id}_news.png"
         filepath = OUTPUT_DIR / filename
-        
         img.save(filepath, "PNG", quality=95)
         
         return str(filepath)
     
-    def _fit_image_to_area(self, img: Image.Image, target_width: int, target_height: int) -> Image.Image:
-        """Crop and resize image to fit target area."""
+    def _fit_image(self, img: Image.Image, target_width: int, target_height: int) -> Image.Image:
+        """Crop and resize."""
         img_ratio = img.width / img.height
         target_ratio = target_width / target_height
         
@@ -256,128 +223,135 @@ class NewsPostRenderer:
             img = img.crop((0, top, img.width, top + new_height))
         
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-        
-        # Slightly darken
         enhancer = ImageEnhance.Brightness(img)
-        img = enhancer.enhance(0.8)
-        
-        return img
+        return enhancer.enhance(0.75)
     
-    def _add_gradient_overlay(self, img: Image.Image, image_height: int):
-        """Add gradient at bottom of image for smooth transition."""
-        gradient_start = image_height - 120
+    def _add_gradient(self, img: Image.Image, image_height: int):
+        """Gradient at bottom of image."""
+        gradient_start = image_height - 150
         for y in range(gradient_start, image_height):
             progress = (y - gradient_start) / (image_height - gradient_start)
             for x in range(self.width):
                 r, g, b = img.getpixel((x, y))
-                # Blend toward dark background color
                 new_r = int(r * (1 - progress) + DARK_BG[0] * progress)
                 new_g = int(g * (1 - progress) + DARK_BG[1] * progress)
                 new_b = int(b * (1 - progress) + DARK_BG[2] * progress)
                 img.putpixel((x, y), (new_r, new_g, new_b))
     
-    def _draw_brand(self, draw: ImageDraw.Draw):
-        """Draw STRUCTURE NEWS at top left - BIGGER."""
-        x, y = 40, 35
+    def _draw_top_brand(self, draw: ImageDraw.Draw):
+        """STRUCTURE NEWS top left - BIG."""
+        x, y = 35, 30
         
-        # Strong multi-layer shadow
-        draw.text((x+3, y+3), "STRUCTURE", font=self.font_brand, fill=(0, 0, 0))
-        draw.text((x+2, y+2), "STRUCTURE", font=self.font_brand, fill=(0, 0, 0))
-        draw.text((x, y), "STRUCTURE", font=self.font_brand, fill=WHITE)
+        # STRUCTURE
+        for offset in range(4, 0, -1):
+            draw.text((x + offset, y + offset), "STRUCTURE", font=self.font_brand_top, fill=BLACK)
+        draw.text((x, y), "STRUCTURE", font=self.font_brand_top, fill=WHITE)
         
-        draw.text((x+3, y+43), "NEWS", font=self.font_brand, fill=(0, 0, 0))
-        draw.text((x+2, y+42), "NEWS", font=self.font_brand, fill=(0, 0, 0))
-        draw.text((x, y+40), "NEWS", font=self.font_brand, fill=WHITE)
+        # NEWS
+        y2 = y + 50
+        for offset in range(4, 0, -1):
+            draw.text((x + offset, y2 + offset), "NEWS", font=self.font_brand_top, fill=BLACK)
+        draw.text((x, y2), "NEWS", font=self.font_brand_top, fill=WHITE)
     
     def _draw_category(self, draw: ImageDraw.Draw, category: str, image_height: int):
-        """Draw category with underline - BIGGER."""
-        y = image_height - 55
+        """Category with underline - BIGGER."""
+        y = image_height - 60
         
         bbox = draw.textbbox((0, 0), category, font=self.font_category)
         text_width = bbox[2] - bbox[0]
         x = (self.width - text_width) // 2
         
-        # Strong shadow for visibility
-        draw.text((x+2, y+2), category, font=self.font_category, fill=(0, 0, 0))
-        draw.text((x+1, y+1), category, font=self.font_category, fill=(20, 20, 20))
+        # Shadow
+        for offset in range(3, 0, -1):
+            draw.text((x + offset, y + offset), category, font=self.font_category, fill=BLACK)
         draw.text((x, y), category, font=self.font_category, fill=WHITE)
         
-        # Thicker underline
-        line_y = y + 35
-        draw.line([(x - 30, line_y), (x + text_width + 30, line_y)], fill=WHITE, width=3)
+        # Underline
+        line_y = y + 42
+        draw.line([(x - 40, line_y), (x + text_width + 40, line_y)], fill=WHITE, width=4)
     
-    def _draw_structure_branding(self, img: Image.Image, draw: ImageDraw.Draw, image_height: int):
-        """Draw STRUCTURE text and logo above the black section - MUCH BIGGER."""
-        # Position just above the text area
-        y = image_height + 20
+    def _draw_structure_watermark(self, img: Image.Image, draw: ImageDraw.Draw, image_height: int):
+        """STRUCTURE + logo watermark - MUCH BIGGER."""
+        y = image_height + 25
         
         brand_text = "STRUCTURE"
+        bbox = draw.textbbox((0, 0), brand_text, font=self.font_structure)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
         
-        # Draw logo if available
         if self.logo:
-            logo_size = 50  # BIGGER logo
+            logo_size = 60
             logo_resized = self.logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-            
-            # Calculate position (centered with text)
-            bbox = draw.textbbox((0, 0), brand_text, font=self.font_brand_large)
-            text_width = bbox[2] - bbox[0]
-            total_width = logo_size + 15 + text_width
-            
+            total_width = logo_size + 20 + text_width
             start_x = (self.width - total_width) // 2
             
-            # Paste logo
+            # Logo
             img.paste(logo_resized, (start_x, y), logo_resized)
             
-            # Draw STRUCTURE text - WHITE and BOLD
-            text_x = start_x + logo_size + 15
-            # Shadow
-            draw.text((text_x + 2, y + 8), brand_text, font=self.font_brand_large, fill=(0, 0, 0))
-            draw.text((text_x, y + 6), brand_text, font=self.font_brand_large, fill=WHITE)
+            # Text with shadow
+            text_x = start_x + logo_size + 20
+            text_y = y + (logo_size - text_height) // 2
+            for offset in range(3, 0, -1):
+                draw.text((text_x + offset, text_y + offset), brand_text, font=self.font_structure, fill=BLACK)
+            draw.text((text_x, text_y), brand_text, font=self.font_structure, fill=WHITE)
         else:
-            # Just draw text centered - WHITE and BOLD
-            bbox = draw.textbbox((0, 0), brand_text, font=self.font_brand_large)
-            text_width = bbox[2] - bbox[0]
             x = (self.width - text_width) // 2
-            # Shadow
-            draw.text((x + 2, y + 2), brand_text, font=self.font_brand_large, fill=(0, 0, 0))
-            draw.text((x, y), brand_text, font=self.font_brand_large, fill=WHITE)
+            for offset in range(3, 0, -1):
+                draw.text((x + offset, y + offset), brand_text, font=self.font_structure, fill=BLACK)
+            draw.text((x, y), brand_text, font=self.font_structure, fill=WHITE)
     
-    def _draw_headline(self, draw: ImageDraw.Draw, headline: str, image_height: int, text_height: int, accent_words: list[str] = None):
-        """Draw MASSIVE headline in bottom section."""
+    def _draw_headline_massive(self, draw: ImageDraw.Draw, headline: str, image_height: int, text_height: int, accent_words: list[str] = None):
+        """MASSIVE headline that FILLS the text area."""
         if accent_words is None:
             accent_words = self._auto_accent_words(headline)
         
-        # ALL CAPS
         headline = headline.upper()
         accent_words = [w.upper() for w in accent_words]
         
-        # Available space for text (leave room for branding at top)
-        text_start_y = image_height + 85  # More space for bigger branding
-        available_height = text_height - 100
+        # Text area starts after STRUCTURE watermark
+        text_start_y = image_height + 100
+        available_height = self.height - text_start_y - 40
+        max_width = self.width - 80
         
-        max_width = self.width - 100  # More padding
+        # Try fonts from HUGE to smaller until it fits
+        fonts = [
+            self.font_headline_huge,  # 120pt
+            self.font_headline_xl,    # 100pt
+            self.font_headline_lg,    # 85pt
+            self.font_headline_md,    # 72pt
+            self.font_headline_sm,    # 60pt
+        ]
         
-        # Try fonts from largest to smallest - start with MASSIVE
-        fonts = [self.font_headline_xl, self.font_headline_lg, self.font_headline_md, self.font_headline_sm]
+        best_font = fonts[-1]
+        best_lines = []
+        best_line_height = 70
         
         for font in fonts:
             lines = self._wrap_text(headline, font, max_width, draw)
-            line_height = font.size + 18  # More line spacing
+            line_height = int(font.size * 1.15)
             total_height = len(lines) * line_height
             
             if total_height <= available_height and len(lines) <= 4:
+                best_font = font
+                best_lines = lines
+                best_line_height = line_height
                 break
+            
+            best_font = font
+            best_lines = lines
+            best_line_height = line_height
         
-        # Center vertically in available space
+        # Center vertically
+        total_height = len(best_lines) * best_line_height
         start_y = text_start_y + (available_height - total_height) // 2
         
-        # Draw each line
-        for i, line in enumerate(lines):
-            y = start_y + i * line_height
-            self._draw_headline_line(draw, line, y, font, accent_words)
+        # Draw each line MASSIVE
+        for i, line in enumerate(best_lines):
+            y = start_y + i * best_line_height
+            self._draw_line_massive(draw, line, y, best_font, accent_words)
     
     def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.Draw) -> list[str]:
-        """Wrap text to fit width."""
+        """Wrap text."""
         words = text.split()
         lines = []
         current_line = []
@@ -385,9 +359,8 @@ class NewsPostRenderer:
         for word in words:
             test_line = " ".join(current_line + [word])
             bbox = draw.textbbox((0, 0), test_line, font=font)
-            width = bbox[2] - bbox[0]
             
-            if width <= max_width:
+            if bbox[2] - bbox[0] <= max_width:
                 current_line.append(word)
             else:
                 if current_line:
@@ -399,11 +372,11 @@ class NewsPostRenderer:
         
         return lines
     
-    def _draw_headline_line(self, draw: ImageDraw.Draw, line: str, y: int, font: ImageFont.FreeTypeFont, accent_words: list[str]):
-        """Draw headline line with accent colors - ULTRA VISIBLE."""
+    def _draw_line_massive(self, draw: ImageDraw.Draw, line: str, y: int, font: ImageFont.FreeTypeFont, accent_words: list[str]):
+        """Draw line with MASSIVE text and accent colors."""
         words = line.split()
         
-        # Calculate widths
+        # Calculate total width
         total_width = 0
         word_widths = []
         space_bbox = draw.textbbox((0, 0), " ", font=font)
@@ -424,25 +397,23 @@ class NewsPostRenderer:
             is_accent = any(a == word_clean or a in word_clean for a in accent_words)
             color = ACCENT_CYAN if is_accent else WHITE
             
-            # STRONG multi-layer shadow for maximum readability
-            draw.text((x + 5, y + 5), word, font=font, fill=(0, 0, 0))
-            draw.text((x + 4, y + 4), word, font=font, fill=(0, 0, 0))
-            draw.text((x + 3, y + 3), word, font=font, fill=(10, 10, 10))
-            draw.text((x + 2, y + 2), word, font=font, fill=(20, 20, 20))
-            draw.text((x, y), word, font=font, fill=color)
+            # Heavy shadow for visibility
+            for offset in range(6, 0, -1):
+                draw.text((x + offset, y + offset), word, font=font, fill=BLACK)
             
+            draw.text((x, y), word, font=font, fill=color)
             x += word_widths[i] + space_width
     
     def _auto_accent_words(self, headline: str) -> list[str]:
-        """Auto-select words to highlight."""
+        """Auto-select accent words."""
         words = headline.split()
-        
         important = [
             "rising", "falling", "breaking", "crisis", "surge", "record",
             "new", "first", "major", "global", "billion", "million",
             "supply", "chain", "shipping", "freight", "logistics",
             "ai", "automation", "technology", "disruption", "shortage",
-            "prices", "costs", "inflation", "growth", "decline"
+            "prices", "costs", "inflation", "growth", "decline", "cutting",
+            "game", "changing", "ecommerce", "success"
         ]
         
         accent = []
@@ -451,7 +422,7 @@ class NewsPostRenderer:
                 accent.append(word)
         
         if len(accent) < 2 and len(words) > 3:
-            for idx in [1, 3, 5]:
+            for idx in [1, 3]:
                 if idx < len(words) and words[idx] not in accent:
                     accent.append(words[idx])
                     if len(accent) >= 2:
@@ -460,15 +431,7 @@ class NewsPostRenderer:
         return accent[:3]
 
 
-async def render_news_post(
-    headline: str,
-    category: str = "SUPPLY CHAIN",
-    accent_words: list[str] = None,
-) -> str:
-    """Convenience function to render a news post."""
+async def render_news_post(headline: str, category: str = "SUPPLY CHAIN", accent_words: list[str] = None) -> str:
+    """Convenience function."""
     renderer = NewsPostRenderer()
-    return await renderer.render_news_post(
-        headline=headline,
-        category=category,
-        accent_words=accent_words,
-    )
+    return await renderer.render_news_post(headline=headline, category=category, accent_words=accent_words)
