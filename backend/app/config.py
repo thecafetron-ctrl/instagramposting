@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     instagram_app_secret: str = ""  # Set via INSTAGRAM_APP_SECRET env var
     instagram_access_token: str = ""  # Set via INSTAGRAM_ACCESS_TOKEN env var
     
+    # Unsplash API
+    unsplash_access_key: str = ""  # Set via UNSPLASH_ACCESS_KEY env var
+    unsplash_secret_key: str = ""  # Set via UNSPLASH_SECRET_KEY env var
+    
     # Assets
     background_image_path: str = "assets/background.png"
     logo_image_path: str = "assets/logo.png"

@@ -1,27 +1,36 @@
 """
-News Post Renderer - Creates single-image news posts like the reference style.
-- Full background image
-- Brand "STRUCTURE NEWS" at top
-- Category with underline in middle
-- Big bold headline at bottom with accent-colored keywords
+News Post Renderer - Creates single-image news posts.
+- Square format (1080x1080)
+- Top 65%: Unsplash image related to the news
+- Bottom 35%: Large ALL CAPS headline with accent colors
+- Brand "STRUCTURE NEWS" at top left
+- Category label with underline
 """
 
 import os
 import uuid
-import random
-import math
+import httpx
+from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 from pathlib import Path
 
-# Dimensions
+from app.config import get_settings
+
+settings = get_settings()
+
+# Square dimensions
 WIDTH = 1080
-HEIGHT = 1350
+HEIGHT = 1080
+
+# Layout proportions
+IMAGE_HEIGHT_RATIO = 0.65  # 65% for image
+TEXT_HEIGHT_RATIO = 0.35   # 35% for text
 
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-ACCENT_CYAN = (0, 200, 255)  # Cyan/blue for highlighted words
-DARK_OVERLAY = (0, 0, 0, 180)
+ACCENT_CYAN = (0, 200, 255)  # Cyan for highlighted words
+DARK_BG = (15, 15, 20)
 
 # Font paths
 ASSETS_DIR = Path(__file__).parent.parent.parent / "assets"
@@ -30,6 +39,103 @@ FONTS_DIR = ASSETS_DIR / "fonts" / "montserrat"
 # Output directory
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "generated_images"
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+
+async def fetch_unsplash_image(query: str) -> Image.Image | None:
+    """Fetch a relevant image from Unsplash API."""
+    access_key = settings.unsplash_access_key
+    
+    if not access_key:
+        print("No Unsplash access key configured")
+        return None
+    
+    # Clean up query for better results
+    search_terms = query.lower()
+    # Add logistics-related terms if not present
+    logistics_terms = ["logistics", "supply chain", "shipping", "freight", "warehouse", "cargo", "port", "truck"]
+    has_logistics = any(term in search_terms for term in logistics_terms)
+    
+    if not has_logistics:
+        # Try to extract key topics and add logistics context
+        search_query = f"{query[:50]} logistics shipping"
+    else:
+        search_query = query[:80]
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.get(
+                "https://api.unsplash.com/search/photos",
+                params={
+                    "query": search_query,
+                    "per_page": 5,
+                    "orientation": "landscape",
+                },
+                headers={
+                    "Authorization": f"Client-ID {access_key}"
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            results = data.get("results", [])
+            if not results:
+                # Fallback to generic logistics search
+                response = await client.get(
+                    "https://api.unsplash.com/search/photos",
+                    params={
+                        "query": "logistics shipping cargo port",
+                        "per_page": 5,
+                        "orientation": "landscape",
+                    },
+                    headers={
+                        "Authorization": f"Client-ID {access_key}"
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                results = data.get("results", [])
+            
+            if results:
+                # Get the first result's regular size URL
+                import random
+                photo = random.choice(results[:3]) if len(results) >= 3 else results[0]
+                image_url = photo.get("urls", {}).get("regular")
+                
+                if image_url:
+                    # Download the image
+                    img_response = await client.get(image_url)
+                    img_response.raise_for_status()
+                    
+                    img = Image.open(BytesIO(img_response.content))
+                    return img.convert("RGB")
+            
+            return None
+            
+        except Exception as e:
+            print(f"Unsplash API error: {e}")
+            return None
+
+
+def create_fallback_background() -> Image.Image:
+    """Create a fallback background if Unsplash fails."""
+    img = Image.new("RGB", (WIDTH, int(HEIGHT * IMAGE_HEIGHT_RATIO)), DARK_BG)
+    draw = ImageDraw.Draw(img)
+    
+    # Add grid pattern for logistics feel
+    for x in range(0, WIDTH, 60):
+        draw.line([(x, 0), (x, img.height)], fill=(30, 30, 40), width=1)
+    for y in range(0, img.height, 60):
+        draw.line([(0, y), (WIDTH, y)], fill=(30, 30, 40), width=1)
+    
+    # Add some nodes
+    import random
+    for _ in range(10):
+        x, y = random.randint(50, WIDTH-50), random.randint(50, img.height-50)
+        for r in range(15, 3, -2):
+            alpha = int(60 * (1 - r/15))
+            draw.ellipse([x-r, y-r, x+r, y+r], fill=(0, 150, 200))
+    
+    return img
 
 
 class NewsPostRenderer:
@@ -43,79 +149,26 @@ class NewsPostRenderer:
     def _load_fonts(self):
         """Load Montserrat fonts."""
         try:
-            self.font_brand = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 48)
-            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-SemiBold.ttf"), 32)
-            self.font_headline = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 64)
-            self.font_headline_small = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 52)
+            # Brand font
+            self.font_brand = ImageFont.truetype(str(FONTS_DIR / "Montserrat-Bold.ttf"), 36)
+            # Category font
+            self.font_category = ImageFont.truetype(str(FONTS_DIR / "Montserrat-SemiBold.ttf"), 24)
+            # Headline font - LARGE
+            self.font_headline = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 56)
+            self.font_headline_large = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 48)
+            self.font_headline_med = ImageFont.truetype(str(FONTS_DIR / "Montserrat-ExtraBold.ttf"), 42)
         except Exception as e:
             print(f"Font loading error: {e}")
-            # Fallback to default
             self.font_brand = ImageFont.load_default()
             self.font_category = ImageFont.load_default()
             self.font_headline = ImageFont.load_default()
-            self.font_headline_small = ImageFont.load_default()
+            self.font_headline_large = ImageFont.load_default()
+            self.font_headline_med = ImageFont.load_default()
     
-    def create_background(self, color_theme: str = "dark") -> Image.Image:
-        """Create a news-style background."""
-        img = Image.new("RGBA", (self.width, self.height), (20, 20, 30, 255))
-        draw = ImageDraw.Draw(img)
-        
-        # Add gradient overlay effect
-        for y in range(self.height):
-            # Darker at bottom for text readability
-            if y > self.height * 0.5:
-                alpha = int(180 * ((y - self.height * 0.5) / (self.height * 0.5)))
-                draw.line([(0, y), (self.width, y)], fill=(0, 0, 0, min(alpha, 220)))
-        
-        # Add some visual elements
-        self._add_logistics_elements(img)
-        
-        return img
-    
-    def _add_logistics_elements(self, img: Image.Image):
-        """Add subtle logistics-themed visual elements."""
-        draw = ImageDraw.Draw(img)
-        
-        # Draw world map style grid lines (very subtle)
-        for i in range(0, self.width, 80):
-            draw.line([(i, 0), (i, self.height)], fill=(40, 40, 50, 30), width=1)
-        for i in range(0, self.height, 80):
-            draw.line([(0, i), (self.width, i)], fill=(40, 40, 50, 30), width=1)
-        
-        # Add some hub nodes
-        hubs = [(200, 300), (800, 200), (500, 400), (300, 600), (700, 500)]
-        for x, y in hubs:
-            # Outer glow
-            for r in range(20, 5, -3):
-                alpha = int(20 * (1 - r/20))
-                draw.ellipse([x-r, y-r, x+r, y+r], fill=(0, 150, 200, alpha))
-            # Inner dot
-            draw.ellipse([x-4, y-4, x+4, y+4], fill=(0, 180, 220, 60))
-        
-        # Draw connection lines between hubs
-        for i, (x1, y1) in enumerate(hubs):
-            for x2, y2 in hubs[i+1:]:
-                if random.random() > 0.5:
-                    draw.line([(x1, y1), (x2, y2)], fill=(0, 150, 200, 20), width=1)
-    
-    def add_dark_gradient_overlay(self, img: Image.Image) -> Image.Image:
-        """Add dark gradient at bottom for text readability."""
-        overlay = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        
-        # Strong gradient at bottom half
-        for y in range(self.height // 2, self.height):
-            progress = (y - self.height // 2) / (self.height // 2)
-            alpha = int(200 * progress)
-            draw.line([(0, y), (self.width, y)], fill=(0, 0, 0, alpha))
-        
-        return Image.alpha_composite(img.convert("RGBA"), overlay)
-    
-    def render_news_post(
+    async def render_news_post(
         self,
         headline: str,
         category: str = "SUPPLY CHAIN",
-        color_theme: str = "dark",
         accent_words: list[str] = None,
     ) -> str:
         """
@@ -123,53 +176,112 @@ class NewsPostRenderer:
         
         Args:
             headline: The news headline text
-            category: Category label (e.g., "SUPPLY CHAIN", "LOGISTICS")
-            color_theme: Background color theme
+            category: Category label
             accent_words: Words to highlight in accent color
         
         Returns:
             Path to the generated image
         """
-        # Create background
-        img = self.create_background(color_theme)
-        img = self.add_dark_gradient_overlay(img)
+        # Create base image
+        img = Image.new("RGB", (self.width, self.height), DARK_BG)
+        
+        # Fetch Unsplash image for top section
+        image_height = int(self.height * IMAGE_HEIGHT_RATIO)
+        text_height = self.height - image_height
+        
+        # Get relevant image from Unsplash
+        unsplash_img = await fetch_unsplash_image(headline)
+        
+        if unsplash_img:
+            # Crop/resize to fit top portion
+            top_img = self._fit_image_to_area(unsplash_img, self.width, image_height)
+        else:
+            top_img = create_fallback_background()
+        
+        # Paste the image at top
+        img.paste(top_img, (0, 0))
+        
+        # Add gradient overlay at bottom of image for text readability
+        self._add_gradient_overlay(img, image_height)
+        
         draw = ImageDraw.Draw(img)
         
-        # Draw brand name at top left
+        # Draw brand at top left (on the image)
         self._draw_brand(draw)
         
-        # Draw category with underline in middle area
-        self._draw_category(draw, category)
+        # Draw category with underline (at the boundary)
+        self._draw_category(draw, category, image_height)
         
-        # Draw headline at bottom
-        self._draw_headline(draw, headline, accent_words)
+        # Draw headline in the bottom 35%
+        self._draw_headline(draw, headline, image_height, text_height, accent_words)
         
         # Save image
         post_id = uuid.uuid4().hex[:8]
         filename = f"{post_id}_news.png"
         filepath = OUTPUT_DIR / filename
         
-        img.convert("RGB").save(filepath, "PNG", quality=95)
+        img.save(filepath, "PNG", quality=95)
         
         return str(filepath)
     
+    def _fit_image_to_area(self, img: Image.Image, target_width: int, target_height: int) -> Image.Image:
+        """Crop and resize image to fit target area (cover mode)."""
+        # Calculate aspect ratios
+        img_ratio = img.width / img.height
+        target_ratio = target_width / target_height
+        
+        if img_ratio > target_ratio:
+            # Image is wider - crop sides
+            new_width = int(img.height * target_ratio)
+            left = (img.width - new_width) // 2
+            img = img.crop((left, 0, left + new_width, img.height))
+        else:
+            # Image is taller - crop top/bottom
+            new_height = int(img.width / target_ratio)
+            top = (img.height - new_height) // 2
+            img = img.crop((0, top, img.width, top + new_height))
+        
+        # Resize to target
+        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        
+        # Slightly darken for better text contrast
+        enhancer = ImageEnhance.Brightness(img)
+        img = enhancer.enhance(0.85)
+        
+        return img
+    
+    def _add_gradient_overlay(self, img: Image.Image, image_height: int):
+        """Add gradient at bottom of image area for text contrast."""
+        draw = ImageDraw.Draw(img)
+        
+        # Gradient starting from middle of image to bottom of image section
+        gradient_start = image_height - 150
+        for y in range(gradient_start, image_height):
+            progress = (y - gradient_start) / (image_height - gradient_start)
+            alpha = int(200 * progress)
+            # Draw semi-transparent black line
+            for x in range(self.width):
+                r, g, b = img.getpixel((x, y))
+                new_r = int(r * (1 - progress * 0.8))
+                new_g = int(g * (1 - progress * 0.8))
+                new_b = int(b * (1 - progress * 0.8))
+                img.putpixel((x, y), (new_r, new_g, new_b))
+    
     def _draw_brand(self, draw: ImageDraw.Draw):
         """Draw STRUCTURE NEWS brand at top left."""
-        brand_text = "STRUCTURE"
-        news_text = "NEWS"
+        x, y = 40, 40
         
-        x, y = 60, 60
+        # Draw with shadow
+        draw.text((x+2, y+2), "STRUCTURE", font=self.font_brand, fill=(0, 0, 0, 150))
+        draw.text((x, y), "STRUCTURE", font=self.font_brand, fill=WHITE)
         
-        # Draw STRUCTURE
-        draw.text((x, y), brand_text, font=self.font_brand, fill=WHITE)
-        
-        # Draw NEWS below
-        draw.text((x, y + 50), news_text, font=self.font_brand, fill=WHITE)
+        draw.text((x+2, y+42), "NEWS", font=self.font_brand, fill=(0, 0, 0, 150))
+        draw.text((x, y+40), "NEWS", font=self.font_brand, fill=WHITE)
     
-    def _draw_category(self, draw: ImageDraw.Draw, category: str):
+    def _draw_category(self, draw: ImageDraw.Draw, category: str, image_height: int):
         """Draw category label with underline."""
-        # Position in middle area
-        y = self.height // 2 + 100
+        # Position at the boundary between image and text area
+        y = image_height - 60
         
         # Get text size
         bbox = draw.textbbox((0, 0), category, font=self.font_category)
@@ -178,57 +290,57 @@ class NewsPostRenderer:
         # Center horizontally
         x = (self.width - text_width) // 2
         
-        # Draw category text
+        # Draw category text with shadow
+        draw.text((x+2, y+2), category, font=self.font_category, fill=(0, 0, 0, 150))
         draw.text((x, y), category, font=self.font_category, fill=WHITE)
         
         # Draw underline
-        line_y = y + 45
-        line_padding = 20
+        line_y = y + 35
+        line_padding = 30
         draw.line(
             [(x - line_padding, line_y), (x + text_width + line_padding, line_y)],
             fill=WHITE,
             width=2
         )
     
-    def _draw_headline(self, draw: ImageDraw.Draw, headline: str, accent_words: list[str] = None):
-        """Draw headline at bottom with accent-colored keywords."""
+    def _draw_headline(self, draw: ImageDraw.Draw, headline: str, image_height: int, text_height: int, accent_words: list[str] = None):
+        """Draw headline in the bottom section with accent-colored keywords."""
         if accent_words is None:
-            # Auto-detect words to highlight (every 3rd-4th important word)
             accent_words = self._auto_accent_words(headline)
         
-        # Convert to uppercase for impact
+        # Convert to uppercase
         headline = headline.upper()
         accent_words = [w.upper() for w in accent_words]
         
         # Wrap text to fit width
-        max_width = self.width - 120  # Padding on sides
-        lines = self._wrap_text_for_headline(headline, max_width)
+        max_width = self.width - 80  # Padding on sides
         
-        # Calculate total height
-        line_height = 75
-        total_height = len(lines) * line_height
+        # Try different font sizes to fit
+        for font in [self.font_headline, self.font_headline_large, self.font_headline_med]:
+            lines = self._wrap_text(headline, font, max_width, draw)
+            line_height = font.size + 10
+            total_height = len(lines) * line_height
+            
+            if total_height <= text_height - 40:
+                break
         
-        # Start position (bottom area)
-        start_y = self.height - total_height - 80
+        # Calculate starting Y position (center in text area)
+        start_y = image_height + (text_height - total_height) // 2
         
         # Draw each line
         for i, line in enumerate(lines):
             y = start_y + i * line_height
-            self._draw_headline_line(draw, line, y, accent_words)
+            self._draw_headline_line(draw, line, y, font, accent_words)
     
-    def _wrap_text_for_headline(self, text: str, max_width: int) -> list[str]:
-        """Wrap headline text to fit width."""
+    def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.Draw) -> list[str]:
+        """Wrap text to fit width."""
         words = text.split()
         lines = []
         current_line = []
         
-        # Create a temporary image for measuring
-        temp_img = Image.new("RGB", (1, 1))
-        temp_draw = ImageDraw.Draw(temp_img)
-        
         for word in words:
             test_line = " ".join(current_line + [word])
-            bbox = temp_draw.textbbox((0, 0), test_line, font=self.font_headline)
+            bbox = draw.textbbox((0, 0), test_line, font=font)
             width = bbox[2] - bbox[0]
             
             if width <= max_width:
@@ -243,20 +355,18 @@ class NewsPostRenderer:
         
         return lines
     
-    def _draw_headline_line(self, draw: ImageDraw.Draw, line: str, y: int, accent_words: list[str]):
+    def _draw_headline_line(self, draw: ImageDraw.Draw, line: str, y: int, font: ImageFont.FreeTypeFont, accent_words: list[str]):
         """Draw a single headline line with accent colors."""
         words = line.split()
         
-        # Calculate total line width first
-        temp_img = Image.new("RGB", (1, 1))
-        temp_draw = ImageDraw.Draw(temp_img)
-        
+        # Calculate total line width
         total_width = 0
         word_widths = []
-        space_width = temp_draw.textbbox((0, 0), " ", font=self.font_headline)[2]
+        space_bbox = draw.textbbox((0, 0), " ", font=font)
+        space_width = space_bbox[2] - space_bbox[0]
         
         for word in words:
-            bbox = temp_draw.textbbox((0, 0), word, font=self.font_headline)
+            bbox = draw.textbbox((0, 0), word, font=font)
             word_width = bbox[2] - bbox[0]
             word_widths.append(word_width)
             total_width += word_width
@@ -269,15 +379,15 @@ class NewsPostRenderer:
         # Draw each word
         for i, word in enumerate(words):
             # Check if word should be accented
-            is_accent = any(accent.upper() in word.upper() for accent in accent_words)
+            word_clean = word.strip(".,!?\"'")
+            is_accent = any(accent.upper() == word_clean or accent.upper() in word_clean for accent in accent_words)
             color = ACCENT_CYAN if is_accent else WHITE
             
-            # Draw shadow first
-            shadow_offset = 3
-            draw.text((x + shadow_offset, y + shadow_offset), word, font=self.font_headline, fill=(0, 0, 0, 150))
+            # Draw shadow
+            draw.text((x + 3, y + 3), word, font=font, fill=(0, 0, 0))
             
             # Draw word
-            draw.text((x, y), word, font=self.font_headline, fill=color)
+            draw.text((x, y), word, font=font, fill=color)
             
             x += word_widths[i] + space_width
     
@@ -292,51 +402,39 @@ class NewsPostRenderer:
             "ai", "automation", "technology", "innovation", "future",
             "impact", "change", "transform", "revolution", "growth",
             "decline", "increase", "decrease", "billion", "million",
-            "global", "worldwide", "industry", "market", "supply", "chain"
+            "global", "worldwide", "inflation", "prices", "costs",
+            "shipping", "freight", "supply", "chain", "logistics"
         ]
         
         accent = []
         
-        # First, check for important keywords
         for word in words:
             clean_word = word.lower().strip(".,!?\"'")
             if clean_word in important_keywords:
                 accent.append(word)
         
-        # If no keywords found, highlight every 3rd-4th word
-        if not accent and len(words) > 4:
-            indices = [2, 5, 8, 11]  # Positions to highlight
-            for idx in indices:
-                if idx < len(words):
+        # If not enough, add some words at specific positions
+        if len(accent) < 2 and len(words) > 4:
+            for idx in [1, 4, 7]:
+                if idx < len(words) and words[idx] not in accent:
                     accent.append(words[idx])
+                    if len(accent) >= 3:
+                        break
         
-        return accent[:4]  # Max 4 highlighted words
+        return accent[:4]
 
 
-def render_news_post(
+async def render_news_post(
     headline: str,
     category: str = "SUPPLY CHAIN",
     accent_words: list[str] = None,
 ) -> str:
     """
     Convenience function to render a news post.
-    
-    Returns:
-        Path to the generated image
     """
     renderer = NewsPostRenderer()
-    return renderer.render_news_post(
+    return await renderer.render_news_post(
         headline=headline,
         category=category,
         accent_words=accent_words,
     )
-
-
-# Test
-if __name__ == "__main__":
-    path = render_news_post(
-        headline="Global Supply Chain Disruptions Rising Amid Port Congestion Crisis",
-        category="SUPPLY CHAIN",
-        accent_words=["RISING", "CRISIS"]
-    )
-    print(f"Generated: {path}")

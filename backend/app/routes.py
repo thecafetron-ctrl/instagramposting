@@ -965,8 +965,8 @@ Follow @structure for daily industry insights.
             category = request.category or news_item.get("category", "SUPPLY CHAIN")
             caption = generate_news_caption(news_item)
         
-        # Render the news post image
-        image_path = render_news_post(
+        # Render the news post image (async - fetches Unsplash image)
+        image_path = await render_news_post(
             headline=headline,
             category=category,
             accent_words=request.accent_words,
@@ -1026,7 +1026,7 @@ async def preview_news_post(
     Just generates the image and returns the path.
     """
     try:
-        image_path = render_news_post(
+        image_path = await render_news_post(
             headline=headline,
             category=category,
         )
