@@ -234,7 +234,10 @@ async def process_scheduled_post(db: AsyncSession, scheduled: ScheduledPost, aut
                 await db.commit()
                 return
             
-            image_path = f"backend/generated_images/{post.slide_1_image}"
+            # Handle both old format (generated_images/file.png) and new format (file.png)
+            filename = os.path.basename(post.slide_1_image)
+            image_path = f"backend/generated_images/{filename}"
+            print(f"[Scheduler] News image path: {image_path}")
             
             print(f"[Scheduler] Posting news to Instagram...")
             result = await post_single_image_to_instagram(
@@ -249,7 +252,9 @@ async def process_scheduled_post(db: AsyncSession, scheduled: ScheduledPost, aut
             image_paths = []
             for img in [post.slide_1_image, post.slide_2_image, post.slide_3_image, post.slide_4_image]:
                 if img:
-                    image_paths.append(f"backend/generated_images/{img}")
+                    # Handle both old format (generated_images/file.png) and new format (file.png)
+                    filename = os.path.basename(img)
+                    image_paths.append(f"backend/generated_images/{filename}")
             
             # Add extra slides from metadata (slides 5+)
             if post.metadata_json and "extra_images" in post.metadata_json:
@@ -258,11 +263,14 @@ async def process_scheduled_post(db: AsyncSession, scheduled: ScheduledPost, aut
                 for i in range(5, slide_count + 1):
                     img_key = f"slide_{i}_image"
                     if img_key in extra_images and extra_images[img_key]:
-                        image_paths.append(f"backend/generated_images/{extra_images[img_key]}")
+                        filename = os.path.basename(extra_images[img_key])
+                        image_paths.append(f"backend/generated_images/{filename}")
+            
+            print(f"[Scheduler] Carousel has {len(image_paths)} images: {image_paths[:2]}...")
             
             if len(image_paths) < 2:
                 scheduled.status = "failed"
-                scheduled.error_message = "Not enough images for carousel"
+                scheduled.error_message = f"Not enough images for carousel (found {len(image_paths)})"
                 await db.commit()
                 return
             
@@ -460,10 +468,12 @@ async def generate_carousel_post_for_schedule(db: AsyncSession, scheduled: Sched
     
     image_paths_list = renderer.render_all_slides(slide_texts)
     
-    # Convert to dict
+    # Convert to dict - store only FILENAME, not full path
     images = {}
     for i, path in enumerate(image_paths_list, 1):
-        images[f"slide_{i}"] = path
+        # path is like "generated_images/abc123_slide_1.png" - extract just filename
+        filename = os.path.basename(path)
+        images[f"slide_{i}"] = filename
     
     # Build metadata with extra slides
     extra_images = {}
