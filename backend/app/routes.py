@@ -1575,11 +1575,11 @@ async def emergency_stop(db: AsyncSession = Depends(get_db)):
     if settings_row:
         settings_row.enabled = False
     
-    # Cancel all pending posts
+    # Cancel all pending and processing posts
     from sqlalchemy import update
     await db.execute(
         update(ScheduledPost)
-        .where(ScheduledPost.status == "pending")
+        .where(ScheduledPost.status.in_(["pending", "processing"]))
         .values(status="cancelled")
     )
     
@@ -1588,4 +1588,45 @@ async def emergency_stop(db: AsyncSession = Depends(get_db)):
     return {
         "status": "STOPPED",
         "message": "Auto-posting disabled, all pending posts cancelled"
+    }
+
+
+@router.post("/schedule/clear")
+async def clear_schedule(db: AsyncSession = Depends(get_db)):
+    """Clear ALL scheduled posts and start fresh."""
+    from sqlalchemy import delete
+    
+    # Delete all scheduled posts
+    await db.execute(delete(ScheduledPost))
+    await db.commit()
+    
+    return {
+        "status": "cleared",
+        "message": "All scheduled posts deleted. Queue is now empty."
+    }
+
+
+@router.get("/schedule/list")
+async def list_schedule(db: AsyncSession = Depends(get_db)):
+    """List all scheduled posts with their status."""
+    result = await db.execute(
+        select(ScheduledPost)
+        .order_by(ScheduledPost.scheduled_time)
+        .limit(50)
+    )
+    posts = result.scalars().all()
+    
+    return {
+        "total": len(posts),
+        "posts": [
+            {
+                "id": p.id,
+                "scheduled_time": p.scheduled_time.isoformat() if p.scheduled_time else None,
+                "post_type": p.post_type or "carousel",
+                "status": p.status,
+                "posted_at": p.posted_at.isoformat() if p.posted_at else None,
+                "error": p.error_message
+            }
+            for p in posts
+        ]
     }

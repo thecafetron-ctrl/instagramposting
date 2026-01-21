@@ -66,10 +66,10 @@ async def check_and_post_scheduled():
             if not today_posts:
                 print("[Scheduler] No posts scheduled for today - generating queue")
                 await auto_generate_daily_queue(db, auto_settings)
-                # Refresh to get new posts
                 await db.commit()
             
-            # Find the NEXT pending post that is due (scheduled_time has passed)
+            # Use FOR UPDATE SKIP LOCKED to prevent race conditions
+            # This ensures only ONE scheduler instance can pick up each post
             result = await db.execute(
                 select(ScheduledPost)
                 .where(and_(
@@ -77,22 +77,29 @@ async def check_and_post_scheduled():
                     ScheduledPost.scheduled_time <= now
                 ))
                 .order_by(ScheduledPost.scheduled_time)
-                .limit(1)  # Only get 1 post
+                .limit(1)
+                .with_for_update(skip_locked=True)  # CRITICAL: Lock the row
             )
             due_post = result.scalar_one_or_none()
             
             if not due_post:
-                print("[Scheduler] No posts due right now")
+                print("[Scheduler] No posts due right now (or all locked)")
                 return
             
-            print(f"[Scheduler] Processing post {due_post.id} scheduled for {due_post.scheduled_time}")
+            # Immediately update status to prevent ANY chance of reprocessing
+            post_id = due_post.id
+            post_type = due_post.post_type or "carousel"
             
-            # Mark as "processing" immediately to prevent duplicate processing
+            print(f"[Scheduler] LOCKED post {post_id} (type: {post_type}) scheduled for {due_post.scheduled_time}")
+            
+            # Update status FIRST before any processing
             due_post.status = "processing"
             await db.commit()
+            print(f"[Scheduler] Marked post {post_id} as PROCESSING")
             
-            # Process the post
+            # Now process (status is already saved)
             await process_scheduled_post(db, due_post, auto_settings)
+            print(f"[Scheduler] Finished processing post {post_id}")
                 
         except Exception as e:
             print(f"[Scheduler] Error: {e}")
@@ -459,18 +466,19 @@ async def generate_carousel_post_for_schedule(db: AsyncSession, scheduled: Sched
         images[f"slide_{i}"] = path
     
     # Build metadata with extra slides
+    extra_images = {}
+    for i in range(5, slide_count + 1):
+        if f"slide_{i}" in images:
+            extra_images[f"slide_{i}_image"] = images[f"slide_{i}"]
+    
     metadata = {
         "color_theme": color_theme,
         "texture": texture,
         "layout": layout,
         "slide_count": slide_count,
-        "auto_generated": True
+        "auto_generated": True,
+        "extra_images": extra_images  # Store extra images in nested dict as expected
     }
-    
-    # Add extra slide images to metadata
-    for i in range(5, slide_count + 1):
-        if f"slide_{i}" in images:
-            metadata[f"slide_{i}_image"] = images[f"slide_{i}"]
     
     # Create post record (use _text keys for formatted content)
     post = Post(
