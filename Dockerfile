@@ -1,7 +1,10 @@
 FROM python:3.11-slim-bookworm
 
+# Install system dependencies including FFmpeg for video processing
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs npm libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev libffi-dev shared-mime-info \
+    nodejs npm \
+    libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev libffi-dev shared-mime-info \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
