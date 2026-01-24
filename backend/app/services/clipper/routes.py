@@ -1533,38 +1533,73 @@ def run_full_railway_processing(
                         pass
             
             ydl_opts = {
-                'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
+                'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[ext=mp4]/best',
                 'outtmpl': str(input_path.with_suffix('')),
                 'merge_output_format': 'mp4',
                 'progress_hooks': [progress_hook],
-                'quiet': True,
+                'quiet': False,  # Show output for debugging
+                'no_warnings': False,
+                'verbose': False,
                 # Fix for 403 Forbidden errors
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-us,en;q=0.5',
                 },
                 'extractor_args': {
                     'youtube': {
                         'player_client': ['android', 'web'],
                     }
                 },
-                'cookiefile': None,  # Can be set to a cookies.txt if needed
             }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([youtube_url])
+            try:
+                add_job_log(job_id, f"Starting yt-dlp download to: {input_path}")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([youtube_url])
+            except Exception as dl_err:
+                add_job_log(job_id, f"✗ Download error: {dl_err}", "error")
+                logger.error(f"yt-dlp download failed: {dl_err}")
+                update_job_progress(job_id, "failed", 0, "Download failed", str(dl_err))
+                return
             
-            # Find downloaded file
-            for ext in ['.mp4', '.mkv', '.webm', '']:
+            # Find downloaded file - check multiple possible extensions
+            add_job_log(job_id, f"Looking for downloaded file in {job_dir}")
+            found_file = None
+            for ext in ['.mp4', '.mkv', '.webm', '.m4a', '']:
                 candidate = input_path.with_suffix(ext) if ext else input_path
-                if candidate.exists() and candidate != input_path:
-                    candidate.rename(input_path)
+                add_job_log(job_id, f"  Checking: {candidate} - exists: {candidate.exists()}")
+                if candidate.exists():
+                    found_file = candidate
                     break
+            
+            # Also check for file without extension but with original name
+            if not found_file:
+                for f in job_dir.iterdir():
+                    add_job_log(job_id, f"  Found in dir: {f.name}")
+                    if f.name.startswith("input") and f.suffix in ['.mp4', '.mkv', '.webm', '.m4a']:
+                        found_file = f
+                        break
+            
+            if found_file and found_file != input_path:
+                add_job_log(job_id, f"Renaming {found_file} to {input_path}")
+                found_file.rename(input_path)
+            elif not found_file and not input_path.exists():
+                add_job_log(job_id, f"✗ Download failed - no video file found in {job_dir}", "error")
+                update_job_progress(job_id, "failed", 0, "Download failed", "Video file not found after download")
+                return
             
             # Cache it
             cache_key = get_video_cache_key(youtube_url)
             _video_cache[cache_key] = job_id
             
-            add_job_log(job_id, "✓ Download complete", "success")
+            add_job_log(job_id, f"✓ Download complete: {input_path} ({input_path.stat().st_size / 1024 / 1024:.1f}MB)", "success")
+        
+        # Verify video file exists before proceeding
+        if not input_path.exists():
+            add_job_log(job_id, f"✗ Video file not found: {input_path}", "error")
+            update_job_progress(job_id, "failed", 0, "Processing failed", f"Video file not found: {input_path}")
+            return
         
         update_job_progress(job_id, "processing", 0.20, "Download complete", "Starting transcription...")
         
@@ -2074,14 +2109,16 @@ def run_smart_analysis(
                         pass
             
             ydl_opts = {
-                'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+                'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[ext=mp4]/best',
                 'outtmpl': str(input_path.with_suffix('')),
                 'merge_output_format': 'mp4',
                 'progress_hooks': [progress_hook],
-                'quiet': True,
+                'quiet': False,
+                'no_warnings': False,
                 # Fix for 403 Forbidden errors
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 },
                 'extractor_args': {
                     'youtube': {
@@ -2090,21 +2127,45 @@ def run_smart_analysis(
                 },
             }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([youtube_url])
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([youtube_url])
+            except Exception as dl_err:
+                logger.error(f"yt-dlp download failed: {dl_err}")
+                update_job_progress(job_id, "failed", 0, "Download failed", str(dl_err))
+                return
             
             # Find downloaded file
-            for ext in ['.mp4', '.mkv', '.webm', '']:
+            found_file = None
+            for ext in ['.mp4', '.mkv', '.webm', '.m4a', '']:
                 candidate = input_path.with_suffix(ext) if ext else input_path
-                if candidate.exists() and candidate != input_path:
-                    candidate.rename(input_path)
+                if candidate.exists():
+                    found_file = candidate
                     break
+            
+            # Also check directory for any video files
+            if not found_file:
+                for f in job_dir.iterdir():
+                    if f.name.startswith("input") and f.suffix in ['.mp4', '.mkv', '.webm']:
+                        found_file = f
+                        break
+            
+            if found_file and found_file != input_path:
+                found_file.rename(input_path)
+            elif not found_file and not input_path.exists():
+                update_job_progress(job_id, "failed", 0, "Download failed", "Video file not created")
+                return
             
             # Cache this video
             cache_key = get_video_cache_key(youtube_url)
             _video_cache[cache_key] = job_id
             
             update_job_progress(job_id, "analyzing", 0.30, "Download complete", "Starting transcription...")
+        
+        # Verify file exists
+        if not input_path.exists():
+            update_job_progress(job_id, "failed", 0, "Processing failed", f"Video file not found: {input_path}")
+            return
         
         # Step 2: Transcribe if needed
         if not transcript_path.exists():
