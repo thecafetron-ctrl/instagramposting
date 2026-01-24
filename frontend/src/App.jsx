@@ -1453,7 +1453,7 @@ function VideoClipperPage() {
       const data = await res.json()
       
       if (data.job_id) {
-        const initialStage = useLocalWorker ? 'Waiting for local worker...' : 'Downloading from YouTube...'
+        const initialStage = useLocalWorker ? 'Downloading on Railway (fast servers)...' : 'Downloading from YouTube...'
         setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: initialStage })
         startPolling(data.job_id)
         setYoutubeUrl('')

@@ -1029,6 +1029,7 @@ async def upload_video_for_worker(
 
 @router.post("/youtube-for-worker")
 async def youtube_for_worker(
+    background_tasks: BackgroundTasks,
     youtube_url: str = Form(...),
     num_clips: int = Form(10),
     min_duration: float = Form(20),
@@ -1040,7 +1041,7 @@ async def youtube_for_worker(
     crop_vertical: bool = Form(True),
     auto_center: bool = Form(True),
 ):
-    """Queue a YouTube video to be processed by a local worker."""
+    """Download YouTube video on Railway (fast), then queue for local worker processing."""
     job_id = secrets.token_hex(4)
     
     job_dir = CLIPS_OUTPUT_DIR / job_id
@@ -1048,7 +1049,8 @@ async def youtube_for_worker(
     
     # Store job config for worker
     _worker_job_configs[job_id] = {
-        "youtube_url": youtube_url,
+        "youtube_url": youtube_url,  # Keep for reference
+        "video_url": None,  # Will be set after download
         "pipeline_config": {
             "num_clips": num_clips,
             "min_duration": min_duration,
@@ -1062,20 +1064,92 @@ async def youtube_for_worker(
         }
     }
     
-    # Initialize progress in worker mode
+    # Initialize progress - downloading on Railway first
     _job_progress[job_id] = {
-        "status": "queued",
+        "status": "downloading",
         "progress": 0,
-        "stage": "Waiting for worker",
-        "detail": f"YouTube job queued - waiting for a local worker",
+        "stage": "Downloading on Railway",
+        "detail": "Using Railway's fast servers to download from YouTube...",
         "mode": "worker",
         "updated_at": datetime.now().isoformat(),
     }
     
-    logger.info(f"YouTube job {job_id} queued for local worker: {youtube_url}")
+    logger.info(f"YouTube job {job_id} - downloading on Railway first: {youtube_url}")
+    
+    # Start download in background
+    background_tasks.add_task(download_youtube_for_worker, job_id, youtube_url, job_dir)
     
     return {
         "job_id": job_id,
-        "status": "queued",
-        "message": "YouTube job queued for local worker. Make sure your local worker is running!"
+        "status": "downloading",
+        "message": "Downloading on Railway (fast servers). Your PC will process it once ready."
     }
+
+
+def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
+    """Download YouTube video on Railway, then queue for worker."""
+    import yt_dlp
+    
+    input_path = job_dir / "input.mp4"
+    
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            try:
+                downloaded = d.get('downloaded_bytes', 0)
+                total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                if total > 0:
+                    pct = downloaded / total
+                    update_job_progress(
+                        job_id, "downloading", pct * 0.9,
+                        "Downloading on Railway",
+                        f"Using fast servers: {downloaded/1024/1024:.1f}MB / {total/1024/1024:.1f}MB"
+                    )
+            except:
+                pass
+        elif d['status'] == 'finished':
+            update_job_progress(job_id, "downloading", 0.95, "Download complete", "Preparing for worker...")
+    
+    try:
+        ydl_opts = {
+            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+            'outtmpl': str(input_path.with_suffix('')),
+            'merge_output_format': 'mp4',
+            'progress_hooks': [progress_hook],
+            'quiet': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([youtube_url])
+        
+        # Find the downloaded file (might have different extension)
+        for ext in ['.mp4', '.mkv', '.webm', '']:
+            candidate = input_path.with_suffix(ext) if ext else input_path
+            if candidate.exists() and candidate != input_path:
+                candidate.rename(input_path)
+                break
+        
+        if not input_path.exists():
+            # Check for file without extension
+            no_ext = job_dir / "input"
+            if no_ext.exists():
+                no_ext.rename(input_path)
+        
+        if input_path.exists():
+            # Update config with local video URL
+            _worker_job_configs[job_id]["video_url"] = f"/api/clipper/clips/{job_id}/input.mp4"
+            _worker_job_configs[job_id]["youtube_url"] = None  # Clear YouTube URL so worker uses local file
+            
+            # Now queue for worker
+            update_job_progress(
+                job_id, "queued", 0,
+                "Ready for your PC",
+                "Video downloaded! Waiting for local worker to pick it up..."
+            )
+            logger.info(f"YouTube download complete for {job_id}, queued for worker")
+        else:
+            raise Exception("Download completed but file not found")
+            
+    except Exception as e:
+        logger.exception(f"YouTube download failed for {job_id}")
+        update_job_progress(job_id, "failed", 0, "Download failed", str(e))
+        _job_progress[job_id]["error"] = str(e)

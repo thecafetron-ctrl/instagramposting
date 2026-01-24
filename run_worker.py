@@ -171,35 +171,40 @@ class LocalWorker:
         
         video_path = job_dir / "input.mp4"
         
-        # Handle YouTube URL
-        if youtube_url:
-            logger.info(f"📺 Downloading from YouTube...")
-            self._download_youtube(youtube_url, video_path, job_id)
-        elif video_url:
-            # Direct download from server
-            logger.info(f"⬇️  Downloading video from server...")
+        # Railway has already downloaded YouTube videos - just fetch from server
+        if video_url:
+            logger.info(f"⬇️  Fetching video from Railway (already downloaded)...")
             full_url = video_url if video_url.startswith('http') else f"{self.server_url}{video_url}"
-            resp = requests.get(full_url, stream=True, timeout=300)
+            resp = requests.get(full_url, stream=True, timeout=600)
             resp.raise_for_status()
             
             total_size = int(resp.headers.get('content-length', 0))
             downloaded = 0
+            last_log = 0
             
             with open(video_path, 'wb') as f:
-                for chunk in resp.iter_content(chunk_size=8192):
+                for chunk in resp.iter_content(chunk_size=65536):  # 64KB chunks for speed
                     f.write(chunk)
                     downloaded += len(chunk)
                     if total_size > 0:
                         pct = downloaded / total_size
                         self.update_job_progress(
                             job_id, pct * 0.1,
-                            "Downloading video",
+                            "Transferring from Railway",
                             f"{downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB"
                         )
-                        if downloaded % (1024*1024) < 8192:  # Log every ~1MB
-                            logger.info(f"   {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB")
+                        # Log every 5MB
+                        if downloaded - last_log > 5*1024*1024:
+                            logger.info(f"   📥 {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB ({pct*100:.0f}%)")
+                            last_log = downloaded
+            
+            logger.info(f"✅ Video transferred: {video_path} ({downloaded/1024/1024:.1f}MB)")
         
-        logger.info(f"✅ Video saved: {video_path}")
+        elif youtube_url:
+            # Fallback: download YouTube directly if no video_url provided
+            logger.info(f"📺 Downloading from YouTube (fallback)...")
+            self._download_youtube(youtube_url, video_path, job_id)
+        
         return video_path
     
     def _download_youtube(self, url: str, output_path: Path, job_id: str):
