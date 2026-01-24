@@ -1307,7 +1307,7 @@ function VideoClipperPage() {
   const [maxDuration, setMaxDuration] = useState(savedSettings?.maxDuration ?? 60)
   const [pauseThreshold, setPauseThreshold] = useState(savedSettings?.pauseThreshold ?? 0.7)
   const [captionStyle, setCaptionStyle] = useState(savedSettings?.captionStyle ?? 'default')
-  const [whisperModel, setWhisperModel] = useState(savedSettings?.whisperModel ?? 'base')
+  const [whisperModel, setWhisperModel] = useState(savedSettings?.whisperModel ?? 'tiny')
   const [burnCaptions, setBurnCaptions] = useState(savedSettings?.burnCaptions ?? true)
   const [cropVertical, setCropVertical] = useState(savedSettings?.cropVertical ?? true)
   const [autoCenter, setAutoCenter] = useState(savedSettings?.autoCenter ?? true)
@@ -1430,12 +1430,54 @@ function VideoClipperPage() {
     }
   }
 
+  const [pollErrorCount, setPollErrorCount] = useState(0)
+
   const startPolling = (jobId) => {
     if (pollInterval) clearInterval(pollInterval)
+    setPollErrorCount(0)
     
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/clipper/job/${jobId}`)
+        
+        // Handle server errors
+        if (res.status === 502 || res.status === 503) {
+          setPollErrorCount(prev => {
+            const newCount = prev + 1
+            if (newCount >= 5) {
+              clearInterval(interval)
+              setPollInterval(null)
+              setCurrentJob(prev => ({
+                ...prev,
+                status: 'failed',
+                stage: 'Server Error',
+                error: 'Server crashed or ran out of memory. Try using "Tiny" Whisper model for lower memory usage, or use a shorter video.'
+              }))
+            }
+            return newCount
+          })
+          return
+        }
+        
+        if (res.status === 404) {
+          setPollErrorCount(prev => {
+            const newCount = prev + 1
+            if (newCount >= 3) {
+              clearInterval(interval)
+              setPollInterval(null)
+              setCurrentJob(prev => ({
+                ...prev,
+                status: 'failed',
+                stage: 'Job Lost',
+                error: 'Job was lost (server may have restarted). Please try again with "Tiny" Whisper model to reduce memory usage.'
+              }))
+            }
+            return newCount
+          })
+          return
+        }
+        
+        setPollErrorCount(0) // Reset on success
         const data = await res.json()
         
         setCurrentJob({
@@ -1457,8 +1499,9 @@ function VideoClipperPage() {
         }
       } catch (err) {
         console.error('Polling failed:', err)
+        setPollErrorCount(prev => prev + 1)
       }
-    }, 1000) // Poll every 1 second for more responsive updates
+    }, 1500) // Poll every 1.5 seconds
     
     setPollInterval(interval)
   }
@@ -1585,12 +1628,13 @@ function VideoClipperPage() {
           <div className="setting-group">
             <label>Whisper Model</label>
             <select value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)}>
-              <option value="tiny">Tiny (fastest)</option>
-              <option value="base">Base (recommended)</option>
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large-v2">Large (best quality)</option>
+              <option value="tiny">Tiny (fastest, ~1GB RAM) ⭐</option>
+              <option value="base">Base (~1.5GB RAM)</option>
+              <option value="small">Small (~2GB RAM)</option>
+              <option value="medium">Medium (~5GB RAM)</option>
+              <option value="large-v2">Large (~10GB RAM)</option>
             </select>
+            <p className="setting-hint">💡 Use Tiny for cloud deployments with limited memory</p>
           </div>
         </div>
 

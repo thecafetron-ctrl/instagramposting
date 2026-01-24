@@ -41,7 +41,7 @@ class ClipperConfigRequest(BaseModel):
     max_duration: float = 60.0
     pause_threshold: float = 0.7
     caption_style: str = "default"
-    whisper_model: str = "base"
+    whisper_model: str = "tiny"  # Default to tiny for cloud deployments with limited RAM
     burn_captions: bool = True
     crop_vertical: bool = True
     auto_center: bool = True
@@ -170,7 +170,7 @@ async def upload_video(
     max_duration: float = Form(60.0),
     pause_threshold: float = Form(0.7),
     caption_style: str = Form("default"),
-    whisper_model: str = Form("base"),
+    whisper_model: str = Form("tiny"),  # Default to tiny for cloud deployments
     burn_captions: bool = Form(True),
     crop_vertical: bool = Form(True),
     auto_center: bool = Form(True),
@@ -264,7 +264,7 @@ class YouTubeRequest(BaseModel):
     max_duration: float = 60.0
     pause_threshold: float = 0.7
     caption_style: str = "default"
-    whisper_model: str = "base"
+    whisper_model: str = "tiny"  # Default to tiny for cloud deployments
     burn_captions: bool = True
     crop_vertical: bool = True
     auto_center: bool = True

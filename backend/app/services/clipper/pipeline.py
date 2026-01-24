@@ -28,7 +28,7 @@ class PipelineConfig:
     max_duration: float = 60.0
     pause_threshold: float = 0.7
     clip_padding: float = 0.2
-    whisper_model: str = "base"
+    whisper_model: str = "tiny"  # Default to tiny for cloud deployments with limited RAM
     language: Optional[str] = None
     crop_vertical: bool = True
     auto_center: bool = True
