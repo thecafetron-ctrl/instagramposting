@@ -1415,6 +1415,7 @@ function VideoClipperPage() {
   const [videoVibe, setVideoVibe] = useState(savedSettings?.videoVibe ?? 'default')
   const [manualTopicSelect, setManualTopicSelect] = useState(savedSettings?.manualTopicSelect ?? false)
   const [captionSize, setCaptionSize] = useState(savedSettings?.captionSize ?? 80)
+  const [previewActiveWord, setPreviewActiveWord] = useState(0)
   const [showStylePanel, setShowStylePanel] = useState(false)
   const [clipEditRequests, setClipEditRequests] = useState({}) // {clipIndex: "edit request text"}
   const [addStockImages, setAddStockImages] = useState(savedSettings?.addStockImages ?? false)
@@ -1429,6 +1430,15 @@ function VideoClipperPage() {
     }
     localStorage.setItem('clipper_settings', JSON.stringify(settings))
   }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, captionAnimation, captionColor, animationColor, titleStyle, titleColor, videoVibe, manualTopicSelect, captionSize, addStockImages])
+
+  // Animate preview caption words
+  useEffect(() => {
+    const previewWords = 6
+    const interval = setInterval(() => {
+      setPreviewActiveWord(prev => (prev + 1) % previewWords)
+    }, 400)
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     checkClipperStatus()
@@ -2286,15 +2296,23 @@ function VideoClipperPage() {
                       </div>
                     )}
                     
-                    {/* Caption in middle-lower */}
+                    {/* Caption in middle-lower - Box per word preview */}
                     <div 
-                      className={`preview-caption-916 anim-${captionAnimation}`}
-                      style={{ 
-                        color: captionColor,
-                        fontSize: `${captionSize * 0.25}px`
-                      }}
+                      className={`preview-caption-916`}
+                      style={{ fontSize: `${captionSize * 0.2}px` }}
                     >
-                      <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>This</span> is how your <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>captions</span> look
+                      {['This', 'is', 'how', 'your', 'captions', 'look'].map((word, idx) => (
+                        <span 
+                          key={idx}
+                          className={`word-box ${idx === previewActiveWord ? 'active' : 'inactive'}`}
+                          style={{ 
+                            color: captionColor,
+                            backgroundColor: idx === previewActiveWord ? animationColor + '90' : 'transparent',
+                          }}
+                        >
+                          {word}
+                        </span>
+                      ))}
                     </div>
                     
                     {/* Zoom indicator */}

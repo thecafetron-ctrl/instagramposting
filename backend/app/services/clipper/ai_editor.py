@@ -191,7 +191,7 @@ def detect_hook_moments(words: List[dict], max_time: float = 5.0) -> List[ClipMo
 
 
 def detect_ending_moments(words: List[dict], min_time: float = None) -> List[ClipMoment]:
-    """Find good ending moments in the transcript."""
+    """Find good ending moments in the transcript - prioritize sentence endings and pauses."""
     if not words:
         return []
     
@@ -200,22 +200,49 @@ def detect_ending_moments(words: List[dict], min_time: float = None) -> List[Cli
     min_time = min_time or (total_duration * 0.7)  # Look in last 30%
     
     for i, word in enumerate(words):
-        if word.get("start", 0) < min_time:
+        word_start = word.get("start", 0)
+        word_end = word.get("end", word_start)
+        if word_start < min_time:
             continue
             
-        word_text = word.get("word", "").lower().strip()
+        word_text = word.get("word", "").strip()
+        intensity = 0.5
+        ending_type = "neutral"
         
+        # Check for sentence-ending punctuation (strong endings)
+        if word_text.endswith('.') or word_text.endswith('!') or word_text.endswith('?'):
+            intensity = 0.95
+            ending_type = "sentence_end"
+        
+        # Check for natural pause after this word (gap > 0.4s)
+        elif i < len(words) - 1:
+            next_start = words[i + 1].get("start", word_end)
+            gap = next_start - word_end
+            if gap > 0.4:
+                intensity = 0.85
+                ending_type = "pause"
+        
+        # Check for ending indicator words
+        lower_text = word_text.lower()
         for category, indicators in ENDING_INDICATORS.items():
             for indicator in indicators:
-                if indicator in word_text:
-                    endings.append(ClipMoment(
-                        timestamp=word.get("start", 0),
-                        type=f"ending_{category}",
-                        text=word_text,
-                        intensity=0.7 + random.uniform(0, 0.3),
-                        word_indices=[i]
-                    ))
+                if indicator in lower_text:
+                    intensity = max(intensity, 0.7 + random.uniform(0, 0.3))
+                    ending_type = f"ending_{category}"
                     break
+        
+        # Only add if it's a decent ending
+        if intensity >= 0.6:
+            endings.append(ClipMoment(
+                timestamp=word_end,  # Use end of word, not start
+                type=ending_type,
+                text=word_text,
+                intensity=intensity,
+                word_indices=[i]
+            ))
+    
+    # Sort by intensity (best endings first)
+    endings.sort(key=lambda e: e.intensity, reverse=True)
     
     return endings
 
@@ -361,22 +388,22 @@ def generate_ass_header(
     title_color: str = "#FFFF00",
     caption_size: int = 80,
 ) -> str:
-    """Generate ASS header with custom colors and size."""
+    """Generate ASS header with custom colors and size for BOX-PER-WORD style."""
     # Convert colors
     main_color = hex_to_ass_color(caption_color)
     highlight_color = hex_to_ass_color(animation_color)
     header_color = hex_to_ass_color(title_color)
+    # Background color for boxes (animation color with transparency)
+    box_bg_color = hex_to_ass_color(animation_color).replace("&H00", "&HAA")  # Semi-transparent
     
     # Calculate scaled sizes
-    hook_size = int(caption_size * 1.125)  # 10% larger
-    peak_size = int(caption_size * 1.0625)  # 6% larger
-    emphasis_size = int(caption_size * 1.1875)  # 15% larger
     header_size = int(caption_size * 1.375)  # 37% larger for title
     
-    # ASS header with CENTERED styles (Alignment 5 = center middle)
-    # MarginV of 600 puts captions slightly below center (middle-lower)
+    # ASS header with BOX-PER-WORD styles
+    # BorderStyle=3 means opaque box, BorderStyle=1 means outline+shadow
+    # MarginV of 650 puts captions in middle-lower area
     return f"""[Script Info]
-Title: Dynamic Captions
+Title: Dynamic Captions - Box Per Word
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -384,11 +411,10 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
-Style: Hook,Montserrat ExtraBold,{hook_size},{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,6,4,5,40,40,600,1
-Style: Peak,Montserrat ExtraBold,{peak_size},{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
-Style: Emphasis,Montserrat ExtraBold,{emphasis_size},{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,110,110,0,0,1,6,4,5,40,40,600,1
-Style: Header,Montserrat ExtraBold,{header_size},{header_color},&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,200,1
+Style: Default,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,2,5,40,40,650,1
+Style: BoxWord,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,{box_bg_color},{box_bg_color},1,0,0,0,100,100,0,0,3,12,0,5,40,40,650,1
+Style: ActiveWord,Montserrat ExtraBold,{int(caption_size*1.1)},{highlight_color},&H000000FF,&H00000000,&HFF000000,1,0,0,0,105,105,0,0,3,15,0,5,40,40,650,1
+Style: Header,Montserrat ExtraBold,{header_size},{header_color},&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,180,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -453,15 +479,22 @@ def generate_enhanced_ass_subtitle(
         )
     
     # Generate header with custom colors and size
+    logger.info(f"🎨 Generating captions with: text={caption_color}, highlight={animation_color}, title={title_color}, size={caption_size}")
     ass_content = generate_ass_header(caption_color, animation_color, title_color, caption_size)
     
-    # Group words into lines (max 6 words per line)
+    # Convert user's custom colors for inline use
+    user_text_color = hex_to_ass_color(caption_color).replace("&H00", "\\c&H").rstrip("&")
+    user_highlight_color = hex_to_ass_color(animation_color).replace("&H00", "\\c&H").rstrip("&")
+    user_box_color = hex_to_ass_color(animation_color).replace("&H00", "\\3c&H").rstrip("&")  # Border/box color
+    
+    # Group words into lines (max 5 words per line for box style)
     lines = []
     current_line = []
     
     for i, word in enumerate(words):
         current_line.append((i, word))
-        if len(current_line) >= 6 or (i < len(words) - 1 and words[i+1].get("start", 0) - word.get("end", 0) > 0.5):
+        # Smaller groups for box-per-word style
+        if len(current_line) >= 5 or (i < len(words) - 1 and words[i+1].get("start", 0) - word.get("end", 0) > 0.4):
             lines.append(current_line)
             current_line = []
     
@@ -476,61 +509,45 @@ def generate_enhanced_ass_subtitle(
         # Add header at top of screen for first 3.5 seconds
         ass_content += f"Dialogue: 1,0:00:00.00,0:00:03.50,Header,,0,0,0,,{hook_header}\n"
     
-    # Generate events for each line (CENTERED captions)
+    # Generate BOX-PER-WORD captions
+    # Each word gets highlighted when it's being spoken
     for line in lines:
         if not line:
             continue
             
-        start_time = line[0][1].get("start", 0) + time_offset
-        end_time = line[-1][1].get("end", 0) + time_offset
+        line_start = line[0][1].get("start", 0) + time_offset
+        line_end = line[-1][1].get("end", 0) + time_offset
         
         # Skip negative times
-        if end_time < 0:
+        if line_end < 0:
             continue
-        start_time = max(0, start_time)
+        line_start = max(0, line_start)
         
-        # Determine line style based on content
-        line_style = "Default"
-        for idx, word in line:
-            if idx in effect_map:
-                effect = effect_map[idx]
-                if effect.effect_type in ["pop", "glow"]:
-                    line_style = "Peak"
-                    break
-        
-        # Check if this is a hook line (first few seconds)
-        if start_time < 3:
-            line_style = "Hook"
-        
-        # Build the text with karaoke timing and WORD-BY-WORD animation
-        text_parts = []
-        for idx, word in line:
-            word_text = word.get("word", "")
+        # For each word timing, create a dialogue line with that word highlighted
+        for word_idx, (idx, word) in enumerate(line):
             word_start = word.get("start", 0) + time_offset
-            word_duration = int((word.get("end", word_start) - word_start) * 100)
-            word_duration = max(10, word_duration)  # Minimum 0.1s per word
+            word_end = word.get("end", word_start + 0.3) + time_offset
+            word_start = max(0, word_start)
             
-            # Apply effects
-            if idx in effect_map:
-                effect = effect_map[idx]
-                if effect.color:
-                    word_text = f"{{{effect.color}}}{word_text}{{\\c&HFFFFFF&}}"
-                if effect.effect_type == "size":
-                    word_text = f"{{\\fscx130\\fscy130}}{word_text}{{\\fscx100\\fscy100}}"
-                if effect.effect_type == "pop":
-                    # Add pop animation
-                    word_text = f"{{\\t(0,100,\\fscx120\\fscy120)\\t(100,200,\\fscx100\\fscy100)}}{word_text}"
+            # Build the text with current word highlighted in a box
+            text_parts = []
+            for j, (jdx, w) in enumerate(line):
+                w_text = w.get("word", "")
+                if j == word_idx:
+                    # This is the active word - highlight with box and pop effect
+                    # Using BorderStyle 3 (opaque box) via style override
+                    text_parts.append(f"{{\\bord12{user_box_color}\\shad0\\fscx110\\fscy110}}{w_text}{{\\r}}")
+                else:
+                    # Inactive word - normal style with user's text color
+                    text_parts.append(f"{{{user_text_color}}}{w_text}")
             
-            # Karaoke timing with fill effect
-            text_parts.append(f"{{\\kf{word_duration}}}{word_text}")
-        
-        text = " ".join(text_parts)
-        
-        # Format times
-        start_str = format_ass_time(max(0, start_time))
-        end_str = format_ass_time(max(0.1, end_time))
-        
-        ass_content += f"Dialogue: 0,{start_str},{end_str},{line_style},,0,0,0,,{text}\n"
+            text = " ".join(text_parts)
+            
+            # Format times
+            start_str = format_ass_time(word_start)
+            end_str = format_ass_time(word_end)
+            
+            ass_content += f"Dialogue: 0,{start_str},{end_str},BoxWord,,0,0,0,,{text}\n"
     
     # Write file
     output_path = Path(output_path)

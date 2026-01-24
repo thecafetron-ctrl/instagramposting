@@ -1458,7 +1458,11 @@ def run_full_railway_processing(
             "title_color": "#FFFF00",
             "video_vibe": "default",
             "manual_topic_select": False,
+            "caption_size": 80,
         }
+    
+    # Log style config for debugging
+    logger.info(f"🎨 Style config for job {job_id}: {style_config}")
     import json
     import traceback
     
