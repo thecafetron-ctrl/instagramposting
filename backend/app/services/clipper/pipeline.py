@@ -101,7 +101,7 @@ class ClipperPipeline:
         
         # Get video duration
         video_info = get_video_info(str(video_path))
-        total_duration = video_info.get('duration', 0)
+        total_duration = video_info.duration
         
         if total_duration <= 0:
             raise ValueError("Could not determine video duration")
