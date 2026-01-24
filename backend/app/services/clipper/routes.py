@@ -358,8 +358,7 @@ def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
             update_job_progress(job_id, "processing", 0.10, "Download complete", "Merging audio/video...")
     
     ydl_opts = {
-        # Format 18/22 are legacy formats that bypass 403 errors
-        'format': '22/18/best[ext=mp4]/best',
+        'format': 'best',
         'outtmpl': str(output_path.with_suffix('')),
         'merge_output_format': 'mp4',
         'quiet': True,
@@ -367,24 +366,11 @@ def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
         'extract_flat': False,
         'progress_hooks': [progress_hook],
         'socket_timeout': 120,
-        'retries': 15,
-        'fragment_retries': 15,
-        'extractor_retries': 5,
-        # Fix for 403 - use mweb/ios clients
+        'retries': 10,
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-        },
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['mweb', 'ios', 'android'],
-                'skip': ['hls', 'dash'],
-            }
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         },
         'nocheckcertificate': True,
-        'geo_bypass': True,
-        'geo_bypass_country': 'US',
     }
     
     update_job_progress(job_id, "processing", 0.02, "Connecting to YouTube", "Fetching video info...")
@@ -1237,26 +1223,16 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
     
     try:
         ydl_opts = {
-            'format': '22/18/best[ext=mp4]/best',
+            'format': 'best',
             'outtmpl': str(input_path.with_suffix('')),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
-            # Fix for 403 - use mweb/ios clients
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                'Accept': '*/*',
-            },
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['mweb', 'ios', 'android'],
-                    'skip': ['hls', 'dash'],
-                }
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             },
             'nocheckcertificate': True,
-            'geo_bypass': True,
-            'retries': 15,
-            'fragment_retries': 15,
+            'retries': 10,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1555,37 +1531,20 @@ def run_full_railway_processing(
             output_template = str(job_dir / "input.%(ext)s")
             
             ydl_opts = {
-                # CRITICAL: Use format 18 (360p mp4) which ALWAYS works, or fall back
-                # Format 18 bypasses most 403 errors as it's a legacy format
-                'format': '18/22/best[ext=mp4]/best',
+                # Simple format - let yt-dlp choose best available
+                'format': 'best',
                 'outtmpl': output_template,
                 'progress_hooks': [progress_hook],
                 'quiet': False,
                 'no_warnings': False,
-                # Don't post-process - just use what we get
-                # Fix for 403 Forbidden - use mweb client (mobile web)
+                # Simple headers
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                    'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 },
-                'extractor_args': {
-                    'youtube': {
-                        # mweb + ios clients are less likely to get 403
-                        'player_client': ['mweb', 'ios', 'android'],
-                        'skip': ['hls', 'dash'],  # Skip adaptive formats that cause 403
-                    }
-                },
-                # Bypass restrictions
+                # Minimal options - let yt-dlp handle it
                 'nocheckcertificate': True,
-                'geo_bypass': True,
-                'geo_bypass_country': 'US',
-                # Retry settings
                 'socket_timeout': 120,
-                'retries': 15,
-                'fragment_retries': 15,
-                'extractor_retries': 5,
+                'retries': 10,
             }
             
             try:
@@ -2071,26 +2030,16 @@ def download_video_only(job_id: str, job_dir: Path, youtube_url: str):
         add_job_log(job_id, "Fetching video info from YouTube...")
         
         ydl_opts = {
-            'format': '22/18/best[ext=mp4]/best',
+            'format': 'best',
             'outtmpl': str(input_path.with_suffix('')),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
-            # Fix for 403 - use mweb/ios clients
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                'Accept': '*/*',
-            },
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['mweb', 'ios', 'android'],
-                    'skip': ['hls', 'dash'],
-                }
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             },
             'nocheckcertificate': True,
-            'geo_bypass': True,
-            'retries': 15,
-            'fragment_retries': 15,
+            'retries': 10,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2180,26 +2129,17 @@ def run_smart_analysis(
             output_template = str(job_dir / "input.%(ext)s")
             
             ydl_opts = {
-                'format': '22/18/best[ext=mp4]/best',
+                'format': 'best',
                 'outtmpl': output_template,
                 'progress_hooks': [progress_hook],
                 'quiet': False,
                 'no_warnings': False,
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                    'Accept': '*/*',
-                },
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['mweb', 'ios', 'android'],
-                        'skip': ['hls', 'dash'],
-                    }
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 },
                 'nocheckcertificate': True,
-                'geo_bypass': True,
                 'socket_timeout': 120,
-                'retries': 15,
-                'fragment_retries': 15,
+                'retries': 10,
             }
             
             try:
