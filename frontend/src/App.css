@@ -4154,3 +4154,31 @@
   height: 18px;
   accent-color: var(--color-accent);
 }
+
+/* Zoom animation for preview */
+@keyframes zoomPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+/* Caption position classes */
+.preview-caption-916.position-top {
+  top: 25%;
+  bottom: auto;
+}
+
+.preview-caption-916.position-middle {
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+}
+
+.preview-caption-916.position-middle-lower {
+  top: 55%;
+  bottom: auto;
+}
+
+.preview-caption-916.position-bottom {
+  top: auto;
+  bottom: 15%;
+}

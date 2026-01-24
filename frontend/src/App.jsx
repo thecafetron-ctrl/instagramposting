@@ -1558,9 +1558,10 @@ function VideoClipperPage() {
           status: 'processing', 
           progress: 0, 
           stage: data.cached ? 'Using cached video' : 'Downloading video...',
-          cached: data.cached 
+          cached: data.cached,
+          manualSelect: data.manual_select || manualTopicSelect,
         })
-        startSmartPolling(data.job_id)
+        startSmartPolling(data.job_id, data.manual_select || manualTopicSelect)
         setYoutubeUrl('')
       } else {
         alert('Failed to start: ' + (data.detail || 'Unknown error'))
@@ -1575,7 +1576,7 @@ function VideoClipperPage() {
     }
   }
   
-  const startSmartPolling = (jobId) => {
+  const startSmartPolling = (jobId, useManualSelect = false) => {
     if (pollInterval) clearInterval(pollInterval)
     let notFoundCount = 0
     
@@ -1623,9 +1624,39 @@ function VideoClipperPage() {
           detail: data.detail,
         }))
         
+        // Check if analysis is complete and manual selection is enabled
+        // Show selection screen when analysis is done (around 50%)
+        const shouldShowSelection = useManualSelect && data.progress >= 0.45 && data.progress < 0.52
+        
+        if (shouldShowSelection && clipperPhase !== 'select') {
+          // Fetch viral candidates
+          try {
+            const candidatesRes = await fetch(`${API_BASE}/clipper/smart/${jobId}/candidates`)
+            if (candidatesRes.ok) {
+              const candidatesData = await candidatesRes.json()
+              if (candidatesData.candidates && candidatesData.candidates.length > 0) {
+                setViralCandidates(candidatesData.candidates)
+                // Pre-select top N based on numClips
+                const preSelected = new Set(
+                  candidatesData.candidates
+                    .slice(0, numClips)
+                    .map(c => c.index)
+                )
+                setSelectedCandidates(preSelected)
+                setClipperPhase('select')
+                return // Don't continue processing, wait for user selection
+              }
+            }
+          } catch (e) {
+            console.error('Failed to fetch candidates:', e)
+          }
+        }
+        
         // Simple phase management - everything on Railway
         if (data.status === 'processing') {
-          setClipperPhase('downloading') // Show progress bar
+          if (clipperPhase !== 'select') {
+            setClipperPhase('downloading') // Show progress bar
+          }
           
           // Fetch any completed clips progressively (every 5 polls)
           if (Math.random() < 0.2) { // ~20% chance each poll to reduce load
@@ -2408,13 +2439,22 @@ function VideoClipperPage() {
                 <h5>📱 Live Preview (9:16)</h5>
                 <div className="phone-mockup-916">
                   <div className="phone-notch"></div>
-                  <div className="phone-screen-916">
+                  <div className="phone-screen-916" style={{
+                    animation: 'zoomPulse 1.5s ease-in-out infinite',
+                  }}>
                     {/* Title at top */}
                     <div 
                       className="preview-title"
-                      style={{ color: titleColor }}
+                      style={{ 
+                        color: titleColor,
+                        fontWeight: titleStyle === 'bold' ? 800 : titleStyle === 'minimal' ? 500 : 700,
+                        textShadow: titleStyle === 'shadow' ? '3px 3px 0 #000' : 
+                                   titleStyle === 'glow' ? `0 0 15px ${titleColor}` : 'none',
+                        WebkitTextStroke: titleStyle === 'outline' ? `1px ${titleColor}` : 'none',
+                        WebkitTextFillColor: titleStyle === 'outline' ? 'transparent' : titleColor,
+                      }}
                     >
-                      HOOK TITLE HERE
+                      🔥 HOOK TITLE
                     </div>
                     
                     {/* Stock image placeholder */}
@@ -2424,18 +2464,24 @@ function VideoClipperPage() {
                       </div>
                     )}
                     
-                    {/* Caption in middle-lower - Box per word preview */}
+                    {/* Caption with position control */}
                     <div 
-                      className={`preview-caption-916`}
-                      style={{ fontSize: `${captionSize * 0.2}px` }}
+                      className={`preview-caption-916 position-${captionPosition}`}
+                      style={{ fontSize: `${captionSize * 0.22}px` }}
                     >
                       {['This', 'is', 'how', 'your', 'captions', 'look'].map((word, idx) => (
                         <span 
                           key={idx}
                           className={`word-box ${idx === previewActiveWord ? 'active' : 'inactive'}`}
                           style={{ 
-                            color: captionColor,
-                            backgroundColor: idx === previewActiveWord ? animationColor + '90' : 'transparent',
+                            color: idx === previewActiveWord ? '#000' : captionColor,
+                            backgroundColor: idx === previewActiveWord ? animationColor : 'transparent',
+                            padding: idx === previewActiveWord ? '4px 10px' : '4px 6px',
+                            borderRadius: '6px',
+                            fontWeight: 700,
+                            textShadow: idx === previewActiveWord ? 'none' : '2px 2px 4px rgba(0,0,0,0.9)',
+                            transform: idx === previewActiveWord ? 'scale(1.15)' : 'scale(1)',
+                            transition: 'all 0.15s ease',
                           }}
                         >
                           {word}
@@ -2445,7 +2491,8 @@ function VideoClipperPage() {
                     
                     {/* Zoom indicator */}
                     <div className="preview-zoom-indicator">
-                      <span>↔️ Zoom every 1.5s</span>
+                      <span>🔄 1.5s zoom</span>
+                      {removeSilence && <span style={{marginLeft: '8px'}}>🔇 No gaps</span>}
                     </div>
                   </div>
                 </div>

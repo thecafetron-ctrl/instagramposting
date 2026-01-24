@@ -57,16 +57,15 @@ def render_final_clip(
     
     # Add scene change zoom effect (every 1.5 seconds) - ALWAYS enabled
     if enable_effects:
-        # Zoompan for smooth zoom in/out every 1.5 seconds
-        # This creates the dynamic "edited" feel that's essential for viral videos
-        # Using zoompan with smooth sine wave oscillation
-        # z oscillates between 1.0 and 1.08 (8% zoom)
-        # Center follows slight movement for more dynamic feel
+        # Use simple scale oscillation for zoom effect - works better on Railway
+        # This creates subtle zoom in/out every 1.5 seconds
+        # Using scale filter which is more compatible than zoompan
+        interval = scene_change_interval
+        # Scale between 100% and 106% with smooth sine wave
         zoom_filter = (
-            f"zoompan=z='1.0+0.08*sin(2*PI*t/{scene_change_interval})':"
-            f"x='iw/2-(iw/zoom/2)+10*sin(2*PI*t/{scene_change_interval*2})':"
-            f"y='ih/2-(ih/zoom/2)+10*cos(2*PI*t/{scene_change_interval*2})':"
-            f"d=1:s=1080x1920:fps=30"
+            f"scale=iw*(1.0+0.06*sin(2*3.14159*t/{interval})):"
+            f"ih*(1.0+0.06*sin(2*3.14159*t/{interval})),"
+            f"crop=1080:1920"
         )
         filters.append(zoom_filter)
     
@@ -104,7 +103,7 @@ def render_final_clip(
     cmd.extend([
         '-c:v', 'libx264',
         '-preset', preset,
-        '-crf', '23',
+        '-crf', '18',  # Lower = better quality (18 is visually lossless)
         '-c:a', 'aac',
         '-b:a', '128k',
         '-movflags', '+faststart',

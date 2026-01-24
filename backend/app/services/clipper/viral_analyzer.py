@@ -281,6 +281,10 @@ def _analyze_fallback(
         return min(score, 95), category, reasons
     
     # Create segments of appropriate length
+    # IMPORTANT: Choose OPTIMAL duration for engagement, not just max
+    # Studies show 20-35 seconds is the sweet spot for viral clips
+    optimal_duration = min(35, max(20, (min_duration + max_duration) / 2))
+    
     moments = []
     i = 0
     
@@ -289,9 +293,9 @@ def _analyze_fallback(
         segment_start = sentences[i]["start"]
         segment_end = sentences[i]["end"]
         
-        # Add more sentences until we hit min duration
+        # Add more sentences until we hit OPTIMAL duration (not just min)
         j = i + 1
-        while j < len(sentences) and (segment_end - segment_start) < min_duration:
+        while j < len(sentences) and (segment_end - segment_start) < optimal_duration:
             segment_sentences.append(sentences[j])
             segment_end = sentences[j]["end"]
             j += 1
@@ -302,7 +306,8 @@ def _analyze_fallback(
             i += 1
             continue
         
-        # If too long, trim
+        # If over optimal but under max, that's fine - stop adding
+        # If over max, trim
         while duration > max_duration and len(segment_sentences) > 1:
             segment_sentences.pop()
             segment_end = segment_sentences[-1]["end"]
