@@ -745,10 +745,22 @@ class LocalWorker:
                 logger.error(f"Could not report failure: {e}")
             return False
         
-        logger.info(f"⬆️  Uploading {len(result.get('clips', []))} clips to server...")
+        # Handle smart job results (candidates, not clips)
+        if result.get("phase") == "analyzed":
+            logger.info(f"✅ Analysis complete - candidates already uploaded to server")
+            logger.info(f"   Go to the web UI to select clips and render!")
+            return True
+        
+        # Handle clip upload for render jobs
+        clips = result.get("clips", [])
+        if not clips:
+            logger.info(f"✅ Job complete (no clips to upload)")
+            return True
+        
+        logger.info(f"⬆️  Uploading {len(clips)} clips to server...")
         
         try:
-            for clip in result.get("clips", []):
+            for clip in clips:
                 clip_path = Path(clip["path"])
                 if clip_path.exists():
                     logger.info(f"   📤 Uploading clip {clip['index']}...")
@@ -777,7 +789,7 @@ class LocalWorker:
                 json={
                     "worker_id": self.worker_id,
                     "success": True,
-                    "clips_count": len(result.get("clips", [])),
+                    "clips_count": len(clips),
                     "processing_time": result.get("processing_time", 0),
                 },
                 timeout=30
