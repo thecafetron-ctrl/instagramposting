@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from .crop import check_ffmpeg, get_ffmpeg_install_instructions, get_video_info, build_crop_filter, detect_motion_center
+from .crop import check_ffmpeg, get_ffmpeg_install_instructions, get_video_info, build_crop_filter, detect_motion_center, get_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def render_final_clip(
             filters.append(f"ass='{ass_escaped}'")
     
     cmd = [
-        'ffmpeg', '-y',
+        get_ffmpeg_path(), '-y',
         '-ss', str(start_time),
         '-i', str(source_video),
         '-t', str(duration),
@@ -103,7 +103,7 @@ def create_thumbnail(
         timestamp = 1.0
     
     cmd = [
-        'ffmpeg', '-y',
+        get_ffmpeg_path(), '-y',
         '-ss', str(timestamp),
         '-i', str(video_path),
         '-vframes', '1',

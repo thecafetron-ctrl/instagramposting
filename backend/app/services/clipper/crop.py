@@ -27,7 +27,66 @@ class VideoInfo:
 
 def check_ffmpeg() -> bool:
     """Check if FFmpeg is installed and accessible."""
-    return shutil.which('ffmpeg') is not None
+    # Try shutil.which first
+    if shutil.which('ffmpeg') is not None:
+        return True
+    
+    # Try common paths on macOS (Homebrew)
+    common_paths = [
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
+    ]
+    for path in common_paths:
+        if Path(path).exists():
+            return True
+    
+    # Try running ffmpeg directly
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
+        return result.returncode == 0
+    except:
+        pass
+    
+    return False
+
+
+def get_ffmpeg_path() -> str:
+    """Get the path to ffmpeg executable."""
+    # Try shutil.which first
+    path = shutil.which('ffmpeg')
+    if path:
+        return path
+    
+    # Try common paths on macOS (Homebrew)
+    common_paths = [
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
+    ]
+    for p in common_paths:
+        if Path(p).exists():
+            return p
+    
+    return 'ffmpeg'  # Fall back to just the name
+
+
+def get_ffprobe_path() -> str:
+    """Get the path to ffprobe executable."""
+    path = shutil.which('ffprobe')
+    if path:
+        return path
+    
+    common_paths = [
+        '/opt/homebrew/bin/ffprobe',
+        '/usr/local/bin/ffprobe',
+        '/usr/bin/ffprobe',
+    ]
+    for p in common_paths:
+        if Path(p).exists():
+            return p
+    
+    return 'ffprobe'
 
 
 def get_ffmpeg_install_instructions() -> str:
@@ -54,7 +113,7 @@ def get_video_info(video_path: str | Path) -> VideoInfo:
     video_path = Path(video_path)
     
     cmd = [
-        'ffprobe',
+        get_ffprobe_path(),
         '-v', 'quiet',
         '-print_format', 'json',
         '-show_format',
@@ -136,7 +195,7 @@ def detect_motion_center(
     video_info = get_video_info(video_path)
     
     cmd = [
-        'ffmpeg',
+        get_ffmpeg_path(),
         '-ss', str(start_time),
         '-t', str(duration),
         '-i', str(video_path),

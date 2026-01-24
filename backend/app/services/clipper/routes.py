@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .pipeline import ClipperPipeline, PipelineConfig, PipelineResult
-from .crop import check_ffmpeg, get_ffmpeg_install_instructions
+from .crop import check_ffmpeg, get_ffmpeg_install_instructions, get_ffmpeg_path
 from .captions import STYLE_PRESETS
 
 logger = logging.getLogger(__name__)
@@ -83,15 +83,22 @@ async def check_clipper_status():
     """Check if video clipper dependencies are available."""
     issues = []
     
-    # Check FFmpeg
-    if not check_ffmpeg():
+    # Check FFmpeg with full path detection
+    ffmpeg_ok = check_ffmpeg()
+    ffmpeg_path = get_ffmpeg_path() if ffmpeg_ok else None
+    
+    if ffmpeg_ok:
+        issues.append({
+            "name": "FFmpeg",
+            "status": "installed",
+            "path": ffmpeg_path
+        })
+    else:
         issues.append({
             "name": "FFmpeg",
             "status": "missing",
             "instructions": get_ffmpeg_install_instructions()
         })
-    else:
-        issues.append({"name": "FFmpeg", "status": "installed"})
     
     # Check faster-whisper
     try:
@@ -102,6 +109,17 @@ async def check_clipper_status():
             "name": "faster-whisper",
             "status": "missing",
             "instructions": "pip install faster-whisper"
+        })
+    
+    # Check yt-dlp
+    try:
+        import yt_dlp
+        issues.append({"name": "yt-dlp", "status": "installed"})
+    except ImportError:
+        issues.append({
+            "name": "yt-dlp",
+            "status": "missing", 
+            "instructions": "pip install yt-dlp"
         })
     
     all_ok = all(d["status"] == "installed" for d in issues)
