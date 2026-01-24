@@ -1286,6 +1286,12 @@ function VideoClipperPage() {
   const [jobResult, setJobResult] = useState(null)
   const [pollInterval, setPollInterval] = useState(null)
   
+  // Smart clipper state
+  const [viralCandidates, setViralCandidates] = useState([])
+  const [selectedCandidates, setSelectedCandidates] = useState(new Set())
+  const [clipperPhase, setClipperPhase] = useState('input') // 'input', 'analyzing', 'select', 'rendering', 'done'
+  const [smartResults, setSmartResults] = useState([])
+  
   // Input mode
   const [inputMode, setInputMode] = useState('upload') // 'upload' or 'youtube'
   const [youtubeUrl, setYoutubeUrl] = useState('')
@@ -1427,44 +1433,168 @@ function VideoClipperPage() {
 
     setUploading(true)
     setJobResult(null)
+    setViralCandidates([])
+    setSelectedCandidates(new Set())
+    setSmartResults([])
+    setClipperPhase('analyzing')
 
-    // Use worker endpoint if enabled
-    const endpoint = useLocalWorker 
-      ? `${API_BASE}/clipper/youtube-for-worker`
-      : `${API_BASE}/clipper/youtube`
-
+    // Use smart analysis endpoint
     try {
       const formData = new FormData()
       formData.append('youtube_url', youtubeUrl.trim())
       formData.append('num_clips', numClips)
       formData.append('min_duration', minDuration)
       formData.append('max_duration', maxDuration)
-      formData.append('pause_threshold', pauseThreshold)
-      formData.append('caption_style', captionStyle)
       formData.append('whisper_model', whisperModel)
-      formData.append('burn_captions', burnCaptions)
-      formData.append('crop_vertical', cropVertical)
-      formData.append('auto_center', autoCenter)
 
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}/clipper/smart/analyze`, {
         method: 'POST',
         body: formData,
       })
       const data = await res.json()
       
       if (data.job_id) {
-        const initialStage = useLocalWorker ? 'Downloading on Railway (fast servers)...' : 'Downloading from YouTube...'
-        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: initialStage })
-        startPolling(data.job_id)
+        setCurrentJob({ 
+          id: data.job_id, 
+          status: 'analyzing', 
+          progress: 0, 
+          stage: data.cached ? 'Using cached video' : 'Downloading video...',
+          cached: data.cached 
+        })
+        startSmartPolling(data.job_id)
         setYoutubeUrl('')
       } else {
         alert('Failed to start: ' + (data.detail || 'Unknown error'))
+        setClipperPhase('input')
       }
     } catch (err) {
-      console.error('YouTube processing failed:', err)
+      console.error('Analysis failed:', err)
       alert('Failed: ' + err.message)
+      setClipperPhase('input')
     } finally {
       setUploading(false)
+    }
+  }
+  
+  const startSmartPolling = (jobId) => {
+    if (pollInterval) clearInterval(pollInterval)
+    
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/clipper/smart/${jobId}/candidates`)
+        const data = await res.json()
+        
+        setCurrentJob(prev => ({
+          ...prev,
+          status: data.status,
+          progress: data.progress,
+          stage: data.stage,
+          detail: data.detail,
+        }))
+        
+        if (data.status === 'analyzed' && data.candidates) {
+          clearInterval(interval)
+          setPollInterval(null)
+          setViralCandidates(data.candidates)
+          // Pre-select top N candidates
+          const preSelected = new Set(
+            data.candidates.filter(c => c.selected).map(c => c.index)
+          )
+          setSelectedCandidates(preSelected)
+          setClipperPhase('select')
+        } else if (data.status === 'completed') {
+          clearInterval(interval)
+          setPollInterval(null)
+          fetchSmartResults(jobId)
+        } else if (data.status === 'failed') {
+          clearInterval(interval)
+          setPollInterval(null)
+          setClipperPhase('input')
+        }
+      } catch (err) {
+        console.error('Polling error:', err)
+      }
+    }, 1500)
+    
+    setPollInterval(interval)
+  }
+  
+  const fetchSmartResults = async (jobId) => {
+    try {
+      const res = await fetch(`${API_BASE}/clipper/smart/${jobId}/results`)
+      const data = await res.json()
+      if (data.clips) {
+        setSmartResults(data.clips)
+        setClipperPhase('done')
+      }
+    } catch (err) {
+      console.error('Failed to fetch results:', err)
+    }
+  }
+  
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+  
+  const toggleCandidateSelection = (index) => {
+    setSelectedCandidates(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(index)) {
+        newSet.delete(index)
+      } else {
+        newSet.add(index)
+      }
+      return newSet
+    })
+  }
+  
+  const handleRenderSelected = async () => {
+    if (selectedCandidates.size === 0) {
+      alert('Please select at least one clip to render')
+      return
+    }
+    
+    setClipperPhase('rendering')
+    
+    try {
+      const formData = new FormData()
+      formData.append('selected_indices', JSON.stringify([...selectedCandidates]))
+      formData.append('burn_captions', burnCaptions)
+      formData.append('crop_vertical', cropVertical)
+      formData.append('auto_center', autoCenter)
+      formData.append('caption_style', captionStyle)
+      formData.append('use_local_worker', useLocalWorker)
+      
+      const res = await fetch(`${API_BASE}/clipper/smart/${currentJob.id}/render`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      
+      if (data.status === 'queued') {
+        // Waiting for local worker
+        setCurrentJob(prev => ({
+          ...prev,
+          status: 'queued',
+          stage: 'Waiting for local worker',
+          detail: `Ready to render ${data.clips_to_render} clips on your PC`,
+        }))
+        startSmartPolling(currentJob.id)
+      } else if (data.status === 'rendering') {
+        setCurrentJob(prev => ({
+          ...prev,
+          status: 'rendering',
+          progress: 0,
+          stage: 'Starting render...',
+        }))
+        startSmartPolling(currentJob.id)
+      }
+    } catch (err) {
+      console.error('Render failed:', err)
+      alert('Failed to start rendering: ' + err.message)
+      setClipperPhase('select')
     }
   }
 
@@ -1865,8 +1995,224 @@ function VideoClipperPage() {
         )}
       </div>
 
-      {/* Progress */}
-      {currentJob && ['processing', 'cancelling'].includes(currentJob.status) && (
+      {/* Smart Analysis Progress */}
+      {clipperPhase === 'analyzing' && currentJob && (
+        <div className="clipper-card progress-card">
+          <div className="progress-header">
+            <h3>🧠 Analyzing Video for Viral Moments</h3>
+          </div>
+          <div className="progress-bar-container">
+            <div 
+              className="progress-bar-fill"
+              style={{ width: `${(currentJob.progress || 0) * 100}%` }}
+            />
+          </div>
+          <div className="progress-info">
+            <p className="progress-text">
+              <strong>{Math.round((currentJob.progress || 0) * 100)}%</strong> — {currentJob.stage || 'Starting...'}
+            </p>
+            {currentJob.detail && (
+              <p className="progress-detail">{currentJob.detail}</p>
+            )}
+            {currentJob.cached && (
+              <p className="progress-detail">✨ Using cached video (already downloaded before)</p>
+            )}
+          </div>
+          <p className="progress-hint">
+            AI is analyzing the transcript to find the most viral-worthy moments...
+          </p>
+        </div>
+      )}
+
+      {/* Viral Candidates Selection */}
+      {clipperPhase === 'select' && viralCandidates.length > 0 && (
+        <div className="clipper-card candidates-card">
+          <div className="candidates-header">
+            <h3>🔥 Viral Moments Found ({viralCandidates.length})</h3>
+            <p>Select which clips to render. AI pre-selected the top {numClips} most viral.</p>
+          </div>
+          
+          <div className="candidates-actions">
+            <span className="selected-count">{selectedCandidates.size} selected</span>
+            <button 
+              className="btn btn-primary"
+              onClick={handleRenderSelected}
+              disabled={selectedCandidates.size === 0}
+            >
+              🎬 Render {selectedCandidates.size} Clip{selectedCandidates.size !== 1 ? 's' : ''}
+            </button>
+          </div>
+          
+          <div className="candidates-list">
+            {viralCandidates.map((candidate, idx) => (
+              <div 
+                key={idx}
+                className={`candidate-card ${selectedCandidates.has(candidate.index) ? 'selected' : ''}`}
+                onClick={() => toggleCandidateSelection(candidate.index)}
+              >
+                <div className="candidate-header">
+                  <div className="candidate-select">
+                    <input 
+                      type="checkbox"
+                      checked={selectedCandidates.has(candidate.index)}
+                      onChange={() => toggleCandidateSelection(candidate.index)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                  <div className="candidate-score">
+                    <span className="score-badge" style={{
+                      background: candidate.virality_score >= 80 ? '#00c864' : 
+                                  candidate.virality_score >= 60 ? '#ffaa00' : '#ff6464'
+                    }}>
+                      {candidate.virality_score}
+                    </span>
+                    <span className="category-badge">{candidate.category}</span>
+                  </div>
+                  <div className="candidate-time">
+                    {candidate.duration.toFixed(0)}s ({formatTime(candidate.start_time)} - {formatTime(candidate.end_time)})
+                  </div>
+                </div>
+                
+                <div className="candidate-content">
+                  <p className="candidate-text">"{candidate.text.slice(0, 200)}{candidate.text.length > 200 ? '...' : ''}"</p>
+                  
+                  <div className="candidate-virality">
+                    <strong>🔥 Why it's viral:</strong> {candidate.virality_reason}
+                  </div>
+                  
+                  <div className="candidate-suggestions">
+                    <div className="suggestion-item">
+                      <strong>📝 Caption:</strong> {candidate.suggested_caption}
+                    </div>
+                    <div className="suggestion-item">
+                      <strong>#️⃣ Hashtags:</strong> {candidate.suggested_hashtags.map(h => `#${h}`).join(' ')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rendering Progress */}
+      {clipperPhase === 'rendering' && currentJob && (
+        <div className="clipper-card progress-card">
+          <div className="progress-header">
+            <h3>🎬 Rendering Selected Clips</h3>
+          </div>
+          <div className="progress-bar-container">
+            <div 
+              className="progress-bar-fill"
+              style={{ width: `${(currentJob.progress || 0) * 100}%` }}
+            />
+          </div>
+          <div className="progress-info">
+            <p className="progress-text">
+              <strong>{Math.round((currentJob.progress || 0) * 100)}%</strong> — {currentJob.stage || 'Starting render...'}
+            </p>
+            {currentJob.detail && (
+              <p className="progress-detail">{currentJob.detail}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Smart Results */}
+      {clipperPhase === 'done' && smartResults.length > 0 && (
+        <div className="clipper-card results-card">
+          <h3>✅ Your Viral Clips Are Ready!</h3>
+          <div className="results-summary">
+            <span>Rendered {smartResults.length} clips</span>
+            <button 
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setClipperPhase('input')
+                setViralCandidates([])
+                setSmartResults([])
+                setCurrentJob(null)
+              }}
+            >
+              Create More Clips
+            </button>
+          </div>
+
+          <div className="clips-grid">
+            {smartResults.map((clip, idx) => (
+              <div key={idx} className="clip-card smart-clip">
+                <div className="clip-preview">
+                  <video 
+                    src={clip.video_url} 
+                    controls 
+                    preload="metadata"
+                  />
+                </div>
+                <div className="clip-info">
+                  <div className="clip-header">
+                    <span className="clip-number">Clip {clip.index}</span>
+                    <span className="virality-score" style={{
+                      background: clip.virality_score >= 80 ? '#00c864' : 
+                                  clip.virality_score >= 60 ? '#ffaa00' : '#ff6464'
+                    }}>
+                      🔥 {clip.virality_score}
+                    </span>
+                  </div>
+                  
+                  <div className="clip-virality-reason">
+                    <strong>Why it's viral:</strong> {clip.virality_reason}
+                  </div>
+                  
+                  <div className="clip-copy-section">
+                    <div className="copy-item">
+                      <label>Caption:</label>
+                      <div className="copy-content">
+                        <span>{clip.suggested_caption}</span>
+                        <button 
+                          className="btn-copy"
+                          onClick={() => {
+                            navigator.clipboard.writeText(clip.suggested_caption)
+                            alert('Caption copied!')
+                          }}
+                        >
+                          📋
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="copy-item">
+                      <label>Hashtags:</label>
+                      <div className="copy-content">
+                        <span>{clip.suggested_hashtags.map(h => `#${h}`).join(' ')}</span>
+                        <button 
+                          className="btn-copy"
+                          onClick={() => {
+                            navigator.clipboard.writeText(clip.suggested_hashtags.map(h => `#${h}`).join(' '))
+                            alert('Hashtags copied!')
+                          }}
+                        >
+                          📋
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <a 
+                    href={clip.video_url} 
+                    download={`clip_${clip.index}.mp4`}
+                    className="btn btn-primary btn-sm"
+                    style={{marginTop: '0.5rem', display: 'block', textAlign: 'center'}}
+                  >
+                    ⬇️ Download
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Legacy Progress (for old flow) */}
+      {currentJob && ['processing', 'cancelling'].includes(currentJob.status) && clipperPhase === 'input' && (
         <div className="clipper-card progress-card">
           <div className="progress-header">
             <h3>{currentJob.status === 'cancelling' ? '⏳ Cancelling...' : '🔄 Processing'}</h3>

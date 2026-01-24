@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from .pipeline import ClipperPipeline, PipelineConfig, PipelineResult
 from .crop import check_ffmpeg, get_ffmpeg_install_instructions, get_ffmpeg_path
 from .captions import STYLE_PRESETS
+from .viral_analyzer import analyze_transcript_for_virality, get_video_cache_key, ViralMoment
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,12 @@ _job_progress = {}
 _job_results = {}
 _job_cancel_flags = {}  # Track which jobs should be cancelled
 _job_threads = {}  # Track running threads
+
+# Video cache - maps cache_key to job_id that has the video
+_video_cache: Dict[str, str] = {}
+
+# Viral analysis results - maps job_id to list of ViralMoment candidates
+_viral_candidates: Dict[str, List[dict]] = {}
 
 # Output directory
 CLIPS_OUTPUT_DIR = Path("generated_clips")
@@ -1153,3 +1160,523 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
         logger.exception(f"YouTube download failed for {job_id}")
         update_job_progress(job_id, "failed", 0, "Download failed", str(e))
         _job_progress[job_id]["error"] = str(e)
+
+
+# ============================================================================
+# SMART CLIPPER - AI-powered viral moment detection
+# ============================================================================
+
+@router.post("/smart/analyze")
+async def smart_analyze_video(
+    background_tasks: BackgroundTasks,
+    youtube_url: str = Form(None),
+    video: UploadFile = File(None),
+    num_clips: int = Form(10),
+    min_duration: float = Form(15),
+    max_duration: float = Form(60),
+    whisper_model: str = Form("base"),
+):
+    """
+    Smart analysis: Download video, transcribe, and find viral moments.
+    
+    Returns candidates with virality scores - user then picks which to render.
+    """
+    if not youtube_url and not video:
+        raise HTTPException(status_code=400, detail="Provide youtube_url or video file")
+    
+    job_id = secrets.token_hex(4)
+    job_dir = CLIPS_OUTPUT_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Check cache for YouTube videos
+    cached_job_id = None
+    if youtube_url:
+        cache_key = get_video_cache_key(youtube_url)
+        if cache_key in _video_cache:
+            cached_job_id = _video_cache[cache_key]
+            cached_path = CLIPS_OUTPUT_DIR / cached_job_id / "input.mp4"
+            if cached_path.exists():
+                logger.info(f"Using cached video from job {cached_job_id}")
+                # Copy cached video
+                shutil.copy(cached_path, job_dir / "input.mp4")
+                # Also copy transcript if exists
+                cached_transcript = CLIPS_OUTPUT_DIR / cached_job_id / "transcript.json"
+                if cached_transcript.exists():
+                    shutil.copy(cached_transcript, job_dir / "transcript.json")
+    
+    # Store config
+    _worker_job_configs[job_id] = {
+        "youtube_url": youtube_url,
+        "cached_from": cached_job_id,
+        "config": {
+            "num_clips": num_clips,
+            "min_duration": min_duration,
+            "max_duration": max_duration,
+            "whisper_model": whisper_model,
+        }
+    }
+    
+    # Initialize progress
+    initial_stage = "Using cached video" if cached_job_id else "Downloading video"
+    _job_progress[job_id] = {
+        "status": "analyzing",
+        "progress": 0.05 if cached_job_id else 0,
+        "stage": initial_stage,
+        "detail": "Starting smart analysis...",
+        "mode": "smart",
+        "updated_at": datetime.now().isoformat(),
+    }
+    
+    # Handle file upload
+    if video:
+        input_path = job_dir / "input.mp4"
+        with open(input_path, "wb") as f:
+            content = await video.read()
+            f.write(content)
+        _job_progress[job_id]["progress"] = 0.1
+        _job_progress[job_id]["stage"] = "Video uploaded"
+    
+    # Start analysis in background
+    background_tasks.add_task(
+        run_smart_analysis,
+        job_id,
+        job_dir,
+        youtube_url,
+        num_clips,
+        min_duration,
+        max_duration,
+        whisper_model,
+        cached_job_id is not None,
+    )
+    
+    return {
+        "job_id": job_id,
+        "status": "analyzing",
+        "cached": cached_job_id is not None,
+        "message": "Analyzing video for viral moments..."
+    }
+
+
+def run_smart_analysis(
+    job_id: str,
+    job_dir: Path,
+    youtube_url: Optional[str],
+    num_clips: int,
+    min_duration: float,
+    max_duration: float,
+    whisper_model: str,
+    is_cached: bool,
+):
+    """Run the smart analysis pipeline."""
+    import json
+    
+    try:
+        input_path = job_dir / "input.mp4"
+        transcript_path = job_dir / "transcript.json"
+        
+        # Step 1: Download if needed
+        if youtube_url and not input_path.exists():
+            import yt_dlp
+            
+            update_job_progress(job_id, "analyzing", 0.05, "Downloading video", "Using Railway's fast servers...")
+            
+            def progress_hook(d):
+                if d['status'] == 'downloading':
+                    try:
+                        downloaded = d.get('downloaded_bytes', 0)
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                        if total > 0:
+                            pct = downloaded / total
+                            update_job_progress(
+                                job_id, "analyzing", 0.05 + pct * 0.25,
+                                "Downloading video",
+                                f"{downloaded/1024/1024:.1f}MB / {total/1024/1024:.1f}MB"
+                            )
+                    except:
+                        pass
+            
+            ydl_opts = {
+                'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+                'outtmpl': str(input_path.with_suffix('')),
+                'merge_output_format': 'mp4',
+                'progress_hooks': [progress_hook],
+                'quiet': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([youtube_url])
+            
+            # Find downloaded file
+            for ext in ['.mp4', '.mkv', '.webm', '']:
+                candidate = input_path.with_suffix(ext) if ext else input_path
+                if candidate.exists() and candidate != input_path:
+                    candidate.rename(input_path)
+                    break
+            
+            # Cache this video
+            cache_key = get_video_cache_key(youtube_url)
+            _video_cache[cache_key] = job_id
+            
+            update_job_progress(job_id, "analyzing", 0.30, "Download complete", "Starting transcription...")
+        
+        # Step 2: Transcribe if needed
+        if not transcript_path.exists():
+            update_job_progress(job_id, "analyzing", 0.35, "Transcribing audio", f"Using Whisper {whisper_model} model...")
+            
+            from .transcribe import transcribe_video
+            
+            transcript = transcribe_video(
+                str(input_path),
+                model_name=whisper_model,
+                output_dir=str(job_dir),
+            )
+            
+            # Save transcript
+            with open(transcript_path, "w") as f:
+                json.dump(transcript, f, indent=2)
+            
+            update_job_progress(job_id, "analyzing", 0.60, "Transcription complete", "Analyzing for viral moments...")
+        else:
+            # Load existing transcript
+            with open(transcript_path) as f:
+                transcript = json.load(f)
+            update_job_progress(job_id, "analyzing", 0.60, "Using cached transcript", "Analyzing for viral moments...")
+        
+        # Step 3: Analyze for viral moments
+        update_job_progress(job_id, "analyzing", 0.65, "Finding viral moments", "AI analyzing transcript...")
+        
+        words = transcript.get("words", [])
+        
+        viral_moments = analyze_transcript_for_virality(
+            words,
+            num_clips=num_clips,
+            min_duration=min_duration,
+            max_duration=max_duration,
+        )
+        
+        # Convert to dict for JSON serialization
+        candidates = []
+        for i, moment in enumerate(viral_moments):
+            candidates.append({
+                "index": i,
+                "start_time": moment.start_time,
+                "end_time": moment.end_time,
+                "duration": moment.duration,
+                "text": moment.text,
+                "virality_score": moment.virality_score,
+                "virality_reason": moment.virality_reason,
+                "suggested_caption": moment.suggested_caption,
+                "suggested_hashtags": moment.suggested_hashtags,
+                "hook": moment.hook,
+                "category": moment.category,
+                "selected": i < num_clips,  # Pre-select top N
+            })
+        
+        # Store candidates
+        _viral_candidates[job_id] = candidates
+        
+        # Save candidates to file
+        with open(job_dir / "viral_candidates.json", "w") as f:
+            json.dump(candidates, f, indent=2)
+        
+        # Update progress to complete analysis phase
+        update_job_progress(
+            job_id, "analyzed", 1.0,
+            "Analysis complete",
+            f"Found {len(candidates)} potential viral moments. Select which to render!"
+        )
+        
+        logger.info(f"Smart analysis complete for {job_id}: {len(candidates)} candidates")
+        
+    except Exception as e:
+        logger.exception(f"Smart analysis failed for {job_id}")
+        update_job_progress(job_id, "failed", 0, "Analysis failed", str(e))
+        _job_progress[job_id]["error"] = str(e)
+
+
+@router.get("/smart/{job_id}/candidates")
+async def get_viral_candidates(job_id: str):
+    """Get the viral moment candidates for a job."""
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    progress = _job_progress[job_id]
+    
+    # Return progress if still analyzing
+    if progress["status"] not in ["analyzed", "rendering", "completed"]:
+        return {
+            "status": progress["status"],
+            "progress": progress["progress"],
+            "stage": progress["stage"],
+            "detail": progress.get("detail"),
+            "candidates": None,
+        }
+    
+    # Return candidates
+    candidates = _viral_candidates.get(job_id, [])
+    
+    return {
+        "status": progress["status"],
+        "progress": progress["progress"],
+        "stage": progress["stage"],
+        "candidates": candidates,
+        "video_url": f"/api/clipper/clips/{job_id}/input.mp4",
+    }
+
+
+@router.post("/smart/{job_id}/render")
+async def render_selected_clips(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    selected_indices: List[int] = None,
+    burn_captions: bool = Form(True),
+    crop_vertical: bool = Form(True),
+    auto_center: bool = Form(True),
+    caption_style: str = Form("default"),
+    use_local_worker: bool = Form(False),
+):
+    """
+    Render the selected viral clips.
+    
+    Args:
+        selected_indices: List of candidate indices to render. If None, renders pre-selected ones.
+    """
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job_id not in _viral_candidates:
+        raise HTTPException(status_code=400, detail="No candidates found. Run analysis first.")
+    
+    candidates = _viral_candidates[job_id]
+    
+    # Get selected candidates
+    if selected_indices is None:
+        # Use pre-selected (top N by score)
+        selected = [c for c in candidates if c.get("selected")]
+    else:
+        selected = [c for i, c in enumerate(candidates) if i in selected_indices]
+    
+    if not selected:
+        raise HTTPException(status_code=400, detail="No clips selected for rendering")
+    
+    # Store render config
+    job_dir = CLIPS_OUTPUT_DIR / job_id
+    _worker_job_configs[job_id] = {
+        **_worker_job_configs.get(job_id, {}),
+        "selected_clips": selected,
+        "render_config": {
+            "burn_captions": burn_captions,
+            "crop_vertical": crop_vertical,
+            "auto_center": auto_center,
+            "caption_style": caption_style,
+        }
+    }
+    
+    if use_local_worker:
+        # Queue for local worker
+        _job_progress[job_id]["status"] = "queued"
+        _job_progress[job_id]["stage"] = "Waiting for local worker"
+        _job_progress[job_id]["detail"] = f"Ready to render {len(selected)} clips on your PC"
+        _job_progress[job_id]["mode"] = "worker"
+        
+        # Add video URL for worker
+        _worker_job_configs[job_id]["video_url"] = f"/api/clipper/clips/{job_id}/input.mp4"
+        
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "clips_to_render": len(selected),
+            "message": "Queued for local worker. Start the worker on your PC!"
+        }
+    else:
+        # Render on server
+        _job_progress[job_id]["status"] = "rendering"
+        _job_progress[job_id]["stage"] = "Starting render"
+        _job_progress[job_id]["progress"] = 0
+        
+        background_tasks.add_task(
+            render_smart_clips,
+            job_id,
+            job_dir,
+            selected,
+            burn_captions,
+            crop_vertical,
+            auto_center,
+            caption_style,
+        )
+        
+        return {
+            "job_id": job_id,
+            "status": "rendering",
+            "clips_to_render": len(selected),
+            "message": f"Rendering {len(selected)} clips..."
+        }
+
+
+def render_smart_clips(
+    job_id: str,
+    job_dir: Path,
+    selected_clips: List[dict],
+    burn_captions: bool,
+    crop_vertical: bool,
+    auto_center: bool,
+    caption_style: str,
+):
+    """Render the selected clips."""
+    import json
+    from .render import render_final_clip, create_thumbnail
+    from .captions import generate_ass_subtitle
+    
+    try:
+        input_path = job_dir / "input.mp4"
+        clips_dir = job_dir / "clips"
+        clips_dir.mkdir(exist_ok=True)
+        
+        # Load transcript for captions
+        transcript_path = job_dir / "transcript.json"
+        transcript = None
+        if transcript_path.exists() and burn_captions:
+            with open(transcript_path) as f:
+                transcript = json.load(f)
+        
+        results = []
+        total = len(selected_clips)
+        
+        for i, clip in enumerate(selected_clips):
+            if _job_cancel_flags.get(job_id):
+                update_job_progress(job_id, "cancelled", 0, "Cancelled", "Render cancelled by user")
+                return
+            
+            progress = (i / total)
+            update_job_progress(
+                job_id, "rendering", progress,
+                f"Rendering clip {i+1}/{total}",
+                f"Score: {clip['virality_score']} - {clip['category']}"
+            )
+            
+            clip_name = f"clip_{i+1:02d}"
+            clip_path = clips_dir / f"{clip_name}.mp4"
+            
+            # Generate captions for this clip if needed
+            ass_path = None
+            if burn_captions and transcript:
+                # Filter words for this clip's time range
+                clip_words = [
+                    w for w in transcript.get("words", [])
+                    if clip["start_time"] <= w.get("start", 0) <= clip["end_time"]
+                ]
+                
+                if clip_words:
+                    ass_path = clips_dir / f"{clip_name}.ass"
+                    generate_ass_subtitle(
+                        clip_words,
+                        str(ass_path),
+                        style_name=caption_style,
+                        offset=-clip["start_time"],  # Adjust timestamps
+                    )
+            
+            # Render the clip
+            render_final_clip(
+                input_path,
+                clip_path,
+                clip["start_time"],
+                clip["end_time"],
+                ass_path=ass_path,
+                crop_vertical=crop_vertical,
+                auto_center=auto_center,
+            )
+            
+            # Create thumbnail
+            thumb_path = clips_dir / f"{clip_name}_thumb.jpg"
+            try:
+                create_thumbnail(clip_path, thumb_path)
+            except:
+                thumb_path = None
+            
+            results.append({
+                "index": i + 1,
+                "video_path": str(clip_path),
+                "video_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}.mp4",
+                "thumbnail_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}_thumb.jpg" if thumb_path else None,
+                "start_time": clip["start_time"],
+                "end_time": clip["end_time"],
+                "duration": clip["duration"],
+                "virality_score": clip["virality_score"],
+                "virality_reason": clip["virality_reason"],
+                "suggested_caption": clip["suggested_caption"],
+                "suggested_hashtags": clip["suggested_hashtags"],
+                "category": clip["category"],
+                "text": clip["text"],
+            })
+        
+        # Save results
+        with open(job_dir / "render_results.json", "w") as f:
+            json.dump(results, f, indent=2)
+        
+        # Store results
+        from .pipeline import PipelineResult, ClipResult
+        
+        clip_results = [
+            ClipResult(
+                index=r["index"],
+                video_path=r["video_path"],
+                thumbnail_path=None,
+                start_time=r["start_time"],
+                end_time=r["end_time"],
+                duration=r["duration"],
+                score=r["virality_score"] / 100.0,
+                text=r["text"][:200],
+            )
+            for r in results
+        ]
+        
+        _job_results[job_id] = PipelineResult(
+            success=True,
+            source_video=str(input_path),
+            output_dir=str(job_dir),
+            transcript_json=str(transcript_path) if transcript_path.exists() else "",
+            transcript_srt="",
+            clips=clip_results,
+            total_duration=0,
+            processing_time=0,
+        )
+        
+        # Also store the full results with virality info
+        _viral_candidates[job_id + "_results"] = results
+        
+        update_job_progress(
+            job_id, "completed", 1.0,
+            "Rendering complete",
+            f"Created {len(results)} viral clips!"
+        )
+        
+        logger.info(f"Smart render complete for {job_id}: {len(results)} clips")
+        
+    except Exception as e:
+        logger.exception(f"Smart render failed for {job_id}")
+        update_job_progress(job_id, "failed", 0, "Render failed", str(e))
+        _job_progress[job_id]["error"] = str(e)
+
+
+@router.get("/smart/{job_id}/results")
+async def get_smart_results(job_id: str):
+    """Get the rendered clips with virality info."""
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    progress = _job_progress[job_id]
+    
+    if progress["status"] != "completed":
+        return {
+            "status": progress["status"],
+            "progress": progress["progress"],
+            "stage": progress["stage"],
+            "clips": None,
+        }
+    
+    results = _viral_candidates.get(job_id + "_results", [])
+    
+    return {
+        "status": "completed",
+        "clips": results,
+    }
