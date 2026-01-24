@@ -3116,3 +3116,118 @@
 .btn-copy:hover {
   opacity: 1;
 }
+
+/* Time Estimates */
+.time-estimates {
+  background: rgba(0, 200, 255, 0.08);
+  border: 1px solid rgba(0, 200, 255, 0.2);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.time-estimates h4 {
+  margin: 0 0 0.5rem 0;
+  color: #00c8ff;
+  font-size: 0.9rem;
+}
+
+.time-estimates ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  font-size: 0.85rem;
+}
+
+.time-estimates li {
+  margin: 0.3rem 0;
+  color: var(--color-text-muted);
+}
+
+.time-estimates li strong {
+  color: var(--color-text);
+}
+
+/* Job Logs */
+.job-logs {
+  margin-top: 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.job-logs h4 {
+  margin: 0 0 0.5rem 0;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.logs-container {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 0.8rem;
+}
+
+.log-entry {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.log-time {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.log-message {
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.log-entry.log-success .log-message {
+  color: #00c864;
+}
+
+.log-entry.log-error .log-message {
+  color: #ff6464;
+}
+
+.log-entry.log-warning .log-message {
+  color: #ffaa00;
+}
+
+/* Waiting Card */
+.waiting-card {
+  border-color: rgba(255, 170, 0, 0.3);
+  background: rgba(255, 170, 0, 0.05);
+}
+
+.waiting-content {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.waiting-message {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+
+.worker-instructions {
+  background: rgba(0, 200, 100, 0.1);
+  border: 1px solid rgba(0, 200, 100, 0.3);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.worker-instructions h4 {
+  margin: 0 0 1rem 0;
+  color: #00c864;
+}
+
+.worker-instructions .hint {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}

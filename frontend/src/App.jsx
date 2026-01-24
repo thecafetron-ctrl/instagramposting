@@ -1289,8 +1289,13 @@ function VideoClipperPage() {
   // Smart clipper state
   const [viralCandidates, setViralCandidates] = useState([])
   const [selectedCandidates, setSelectedCandidates] = useState(new Set())
-  const [clipperPhase, setClipperPhase] = useState('input') // 'input', 'analyzing', 'select', 'rendering', 'done'
+  const [clipperPhase, setClipperPhase] = useState('input') // 'input', 'downloading', 'waiting', 'analyzing', 'select', 'rendering', 'done'
   const [smartResults, setSmartResults] = useState([])
+  
+  // Logs and estimates
+  const [jobLogs, setJobLogs] = useState([])
+  const [showLogs, setShowLogs] = useState(false)
+  const [timeEstimates, setTimeEstimates] = useState(null)
   
   // Input mode
   const [inputMode, setInputMode] = useState('upload') // 'upload' or 'youtube'
@@ -1481,8 +1486,21 @@ function VideoClipperPage() {
     
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/clipper/smart/${jobId}/candidates`)
+        // Fetch job status
+        const res = await fetch(`${API_BASE}/clipper/job/${jobId}`)
         const data = await res.json()
+        
+        // Also fetch logs
+        try {
+          const logsRes = await fetch(`${API_BASE}/clipper/job/${jobId}/logs`)
+          const logsData = await logsRes.json()
+          setJobLogs(logsData.logs || [])
+        } catch (e) {}
+        
+        // Update time estimates if available
+        if (data.estimates) {
+          setTimeEstimates(data.estimates)
+        }
         
         setCurrentJob(prev => ({
           ...prev,
@@ -1492,16 +1510,28 @@ function VideoClipperPage() {
           detail: data.detail,
         }))
         
-        if (data.status === 'analyzed' && data.candidates) {
-          clearInterval(interval)
-          setPollInterval(null)
-          setViralCandidates(data.candidates)
-          // Pre-select top N candidates
-          const preSelected = new Set(
-            data.candidates.filter(c => c.selected).map(c => c.index)
-          )
-          setSelectedCandidates(preSelected)
-          setClipperPhase('select')
+        // Update phase based on status
+        if (data.status === 'downloading') {
+          setClipperPhase('downloading')
+        } else if (data.status === 'ready_for_worker') {
+          setClipperPhase('waiting')
+        } else if (data.status === 'processing') {
+          setClipperPhase('analyzing')
+        } else if (data.status === 'analyzed') {
+          // Fetch candidates
+          const candidatesRes = await fetch(`${API_BASE}/clipper/smart/${jobId}/candidates`)
+          const candidatesData = await candidatesRes.json()
+          
+          if (candidatesData.candidates) {
+            clearInterval(interval)
+            setPollInterval(null)
+            setViralCandidates(candidatesData.candidates)
+            const preSelected = new Set(
+              candidatesData.candidates.filter(c => c.selected).map(c => c.index)
+            )
+            setSelectedCandidates(preSelected)
+            setClipperPhase('select')
+          }
         } else if (data.status === 'completed') {
           clearInterval(interval)
           setPollInterval(null)
@@ -1995,11 +2025,17 @@ function VideoClipperPage() {
         )}
       </div>
 
-      {/* Smart Analysis Progress */}
-      {clipperPhase === 'analyzing' && currentJob && (
+      {/* Download Progress */}
+      {clipperPhase === 'downloading' && currentJob && (
         <div className="clipper-card progress-card">
           <div className="progress-header">
-            <h3>🧠 Analyzing Video for Viral Moments</h3>
+            <h3>⬇️ Downloading on Railway (Fast Servers)</h3>
+            <button 
+              className="btn btn-sm btn-secondary"
+              onClick={() => setShowLogs(!showLogs)}
+            >
+              {showLogs ? '📋 Hide Logs' : '📋 Show Logs'}
+            </button>
           </div>
           <div className="progress-bar-container">
             <div 
@@ -2014,13 +2050,140 @@ function VideoClipperPage() {
             {currentJob.detail && (
               <p className="progress-detail">{currentJob.detail}</p>
             )}
-            {currentJob.cached && (
-              <p className="progress-detail">✨ Using cached video (already downloaded before)</p>
+          </div>
+          
+          {timeEstimates && (
+            <div className="time-estimates">
+              <h4>⏱️ Estimated Times</h4>
+              <ul>
+                <li><strong>Download:</strong> {timeEstimates.download}</li>
+                <li><strong>Transcription:</strong> {timeEstimates.transcribe}</li>
+                <li><strong>Analysis:</strong> {timeEstimates.analyze}</li>
+                <li><strong>Rendering:</strong> {timeEstimates.render}</li>
+                <li><strong>Total:</strong> {timeEstimates.total}</li>
+              </ul>
+            </div>
+          )}
+          
+          {showLogs && jobLogs.length > 0 && (
+            <div className="job-logs">
+              <h4>📋 Logs</h4>
+              <div className="logs-container">
+                {jobLogs.map((log, i) => (
+                  <div key={i} className={`log-entry log-${log.level}`}>
+                    <span className="log-time">{new Date(log.time).toLocaleTimeString()}</span>
+                    <span className="log-message">{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Waiting for Worker */}
+      {clipperPhase === 'waiting' && currentJob && (
+        <div className="clipper-card progress-card waiting-card">
+          <div className="progress-header">
+            <h3>⏳ Waiting for Your PC</h3>
+            <button 
+              className="btn btn-sm btn-secondary"
+              onClick={() => setShowLogs(!showLogs)}
+            >
+              {showLogs ? '📋 Hide Logs' : '📋 Show Logs'}
+            </button>
+          </div>
+          
+          <div className="waiting-content">
+            <p className="waiting-message">
+              ✅ Video downloaded on Railway!<br/>
+              Now waiting for your local worker to pick up the job.
+            </p>
+            
+            <div className="worker-instructions">
+              <h4>🖥️ Start the Worker on Your PC:</h4>
+              <button 
+                className="btn btn-start-worker"
+                onClick={() => {
+                  window.location.href = 'clipperworker://start'
+                }}
+              >
+                🚀 Start Worker
+              </button>
+              <p className="hint">Or double-click <code>Start Worker.command</code> in your project folder</p>
+            </div>
+          </div>
+          
+          {timeEstimates && (
+            <div className="time-estimates">
+              <h4>⏱️ Remaining Steps (on your PC)</h4>
+              <ul>
+                <li><strong>Transcription:</strong> {timeEstimates.transcribe}</li>
+                <li><strong>Analysis:</strong> {timeEstimates.analyze}</li>
+              </ul>
+            </div>
+          )}
+          
+          {showLogs && jobLogs.length > 0 && (
+            <div className="job-logs">
+              <h4>📋 Logs</h4>
+              <div className="logs-container">
+                {jobLogs.map((log, i) => (
+                  <div key={i} className={`log-entry log-${log.level}`}>
+                    <span className="log-time">{new Date(log.time).toLocaleTimeString()}</span>
+                    <span className="log-message">{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Processing on Worker */}
+      {clipperPhase === 'analyzing' && currentJob && (
+        <div className="clipper-card progress-card">
+          <div className="progress-header">
+            <h3>🧠 Processing on Your PC</h3>
+            <button 
+              className="btn btn-sm btn-secondary"
+              onClick={() => setShowLogs(!showLogs)}
+            >
+              {showLogs ? '📋 Hide Logs' : '📋 Show Logs'}
+            </button>
+          </div>
+          <div className="progress-bar-container">
+            <div 
+              className="progress-bar-fill"
+              style={{ width: `${(currentJob.progress || 0) * 100}%` }}
+            />
+          </div>
+          <div className="progress-info">
+            <p className="progress-text">
+              <strong>{Math.round((currentJob.progress || 0) * 100)}%</strong> — {currentJob.stage || 'Processing...'}
+            </p>
+            {currentJob.detail && (
+              <p className="progress-detail">{currentJob.detail}</p>
             )}
           </div>
+          
           <p className="progress-hint">
-            AI is analyzing the transcript to find the most viral-worthy moments...
+            💻 Running Whisper transcription and viral analysis on your PC
           </p>
+          
+          {showLogs && jobLogs.length > 0 && (
+            <div className="job-logs">
+              <h4>📋 Logs</h4>
+              <div className="logs-container">
+                {jobLogs.map((log, i) => (
+                  <div key={i} className={`log-entry log-${log.level}`}>
+                    <span className="log-time">{new Date(log.time).toLocaleTimeString()}</span>
+                    <span className="log-message">{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

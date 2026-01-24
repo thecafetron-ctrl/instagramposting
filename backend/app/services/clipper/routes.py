@@ -816,21 +816,42 @@ async def get_pending_worker_job(worker_id: str = None):
     
     # Find a job that needs worker processing
     for job_id, progress in _job_progress.items():
+        # Check for smart jobs ready for worker (download complete)
+        if progress.get("mode") == "smart" and progress["status"] == "ready_for_worker":
+            # Claim this job
+            progress["status"] = "processing"
+            progress["worker_id"] = worker_id
+            progress["stage"] = "Assigned to worker"
+            
+            config = _worker_job_configs.get(job_id, {})
+            add_job_log(job_id, f"Job claimed by worker: {worker_id}")
+            
+            return {
+                "job": {
+                    "job_id": job_id,
+                    "job_type": "smart",  # Smart job = transcribe + analyze + render
+                    "video_url": config.get("video_url"),
+                    "config": config.get("config", {}),
+                }
+            }
+        
+        # Check for legacy worker mode jobs
         if progress.get("mode") == "worker" and progress["status"] == "queued":
             # Claim this job
             progress["status"] = "processing"
             progress["worker_id"] = worker_id
             progress["stage"] = "Assigned to worker"
             
-            # Return job config
             config = _worker_job_configs.get(job_id, {})
             
             return {
                 "job": {
                     "job_id": job_id,
+                    "job_type": "render",  # Just render pre-selected clips
                     "video_url": config.get("video_url"),
                     "youtube_url": config.get("youtube_url"),
-                    "config": config.get("pipeline_config", {}),
+                    "config": config.get("pipeline_config", config.get("config", {})),
+                    "selected_clips": config.get("selected_clips"),
                 }
             }
     
@@ -848,12 +869,48 @@ async def update_worker_job_progress(job_id: str, data: dict):
     detail = data.get("detail", "")
     
     update_job_progress(job_id, "processing", progress, stage, detail)
+    add_job_log(job_id, f"[{progress*100:.0f}%] {stage}: {detail}")
     
     # Check if job was cancelled
     if _job_cancel_flags.get(job_id):
+        add_job_log(job_id, "Job cancellation requested", "warning")
         return {"status": "cancelled", "should_stop": True}
     
     return {"status": "ok", "should_stop": False}
+
+
+@router.post("/worker/jobs/{job_id}/candidates")
+async def upload_worker_candidates(job_id: str, data: dict):
+    """Receive viral candidates from local worker after transcription + analysis."""
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    candidates = data.get("candidates", [])
+    transcript = data.get("transcript", {})
+    
+    # Store candidates
+    _viral_candidates[job_id] = candidates
+    
+    # Save transcript to job directory
+    job_dir = CLIPS_OUTPUT_DIR / job_id
+    if transcript:
+        with open(job_dir / "transcript.json", "w") as f:
+            json.dump(transcript, f, indent=2)
+    
+    # Save candidates
+    with open(job_dir / "viral_candidates.json", "w") as f:
+        json.dump(candidates, f, indent=2)
+    
+    add_job_log(job_id, f"✓ Received {len(candidates)} viral candidates from worker", "success")
+    
+    # Update status to analyzed
+    update_job_progress(
+        job_id, "analyzed", 1.0,
+        "Analysis complete",
+        f"Found {len(candidates)} potential viral moments. Select which to render!"
+    )
+    
+    return {"status": "ok", "candidates_received": len(candidates)}
 
 
 @router.post("/worker/jobs/{job_id}/upload-clip")
@@ -1166,6 +1223,28 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
 # SMART CLIPPER - AI-powered viral moment detection
 # ============================================================================
 
+# Job logs storage
+_job_logs: Dict[str, List[dict]] = {}
+
+
+def add_job_log(job_id: str, message: str, level: str = "info"):
+    """Add a log entry for a job."""
+    if job_id not in _job_logs:
+        _job_logs[job_id] = []
+    _job_logs[job_id].append({
+        "time": datetime.now().isoformat(),
+        "level": level,
+        "message": message,
+    })
+    logger.info(f"[{job_id}] {message}")
+
+
+@router.get("/job/{job_id}/logs")
+async def get_job_logs(job_id: str):
+    """Get logs for a job."""
+    return {"logs": _job_logs.get(job_id, [])}
+
+
 @router.post("/smart/analyze")
 async def smart_analyze_video(
     background_tasks: BackgroundTasks,
@@ -1175,11 +1254,14 @@ async def smart_analyze_video(
     min_duration: float = Form(15),
     max_duration: float = Form(60),
     whisper_model: str = Form("base"),
+    use_local_worker: bool = Form(True),  # Default to local worker for processing
 ):
     """
-    Smart analysis: Download video, transcribe, and find viral moments.
+    Smart analysis flow:
+    - Railway: Downloads video only (fast servers)
+    - Local Worker: Transcription + Analysis + Rendering (your PC's power)
     
-    Returns candidates with virality scores - user then picks which to render.
+    Returns job_id to track progress.
     """
     if not youtube_url and not video:
         raise HTTPException(status_code=400, detail="Provide youtube_url or video file")
@@ -1188,73 +1270,182 @@ async def smart_analyze_video(
     job_dir = CLIPS_OUTPUT_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     
+    # Initialize logs
+    _job_logs[job_id] = []
+    add_job_log(job_id, f"Job created: {job_id}")
+    
     # Check cache for YouTube videos
     cached_job_id = None
     if youtube_url:
         cache_key = get_video_cache_key(youtube_url)
+        add_job_log(job_id, f"Checking cache for video: {cache_key}")
         if cache_key in _video_cache:
             cached_job_id = _video_cache[cache_key]
             cached_path = CLIPS_OUTPUT_DIR / cached_job_id / "input.mp4"
             if cached_path.exists():
-                logger.info(f"Using cached video from job {cached_job_id}")
-                # Copy cached video
+                add_job_log(job_id, f"✓ Found cached video from job {cached_job_id}", "success")
                 shutil.copy(cached_path, job_dir / "input.mp4")
-                # Also copy transcript if exists
-                cached_transcript = CLIPS_OUTPUT_DIR / cached_job_id / "transcript.json"
-                if cached_transcript.exists():
-                    shutil.copy(cached_transcript, job_dir / "transcript.json")
+            else:
+                cached_job_id = None
+                add_job_log(job_id, "Cache miss - video file not found")
     
     # Store config
     _worker_job_configs[job_id] = {
         "youtube_url": youtube_url,
+        "video_url": f"/api/clipper/clips/{job_id}/input.mp4" if cached_job_id else None,
         "cached_from": cached_job_id,
         "config": {
             "num_clips": num_clips,
             "min_duration": min_duration,
             "max_duration": max_duration,
             "whisper_model": whisper_model,
-        }
+        },
+        "use_local_worker": use_local_worker,
     }
     
-    # Initialize progress
-    initial_stage = "Using cached video" if cached_job_id else "Downloading video"
+    # Initialize progress with time estimates
     _job_progress[job_id] = {
-        "status": "analyzing",
-        "progress": 0.05 if cached_job_id else 0,
-        "stage": initial_stage,
-        "detail": "Starting smart analysis...",
+        "status": "downloading" if not cached_job_id else "ready_for_worker",
+        "progress": 0.9 if cached_job_id else 0,
+        "stage": "Using cached video" if cached_job_id else "Downloading on Railway",
+        "detail": "Video ready for processing" if cached_job_id else "Starting download...",
         "mode": "smart",
         "updated_at": datetime.now().isoformat(),
+        "estimates": {
+            "download": "~30s-2min (Railway fast servers)",
+            "transcribe": "~1-3min (on your PC)",
+            "analyze": "~10-30s (AI analysis)",
+            "render": "~30s per clip (on your PC)",
+            "total": "~3-8min depending on video length",
+        }
     }
     
     # Handle file upload
     if video:
+        add_job_log(job_id, f"Receiving uploaded file: {video.filename}")
         input_path = job_dir / "input.mp4"
         with open(input_path, "wb") as f:
             content = await video.read()
             f.write(content)
-        _job_progress[job_id]["progress"] = 0.1
-        _job_progress[job_id]["stage"] = "Video uploaded"
+        file_size_mb = len(content) / 1024 / 1024
+        add_job_log(job_id, f"✓ File uploaded: {file_size_mb:.1f}MB", "success")
+        _job_progress[job_id]["progress"] = 0.9
+        _job_progress[job_id]["status"] = "ready_for_worker"
+        _job_progress[job_id]["stage"] = "Ready for your PC"
+        _worker_job_configs[job_id]["video_url"] = f"/api/clipper/clips/{job_id}/input.mp4"
     
-    # Start analysis in background
-    background_tasks.add_task(
-        run_smart_analysis,
-        job_id,
-        job_dir,
-        youtube_url,
-        num_clips,
-        min_duration,
-        max_duration,
-        whisper_model,
-        cached_job_id is not None,
-    )
+    # If cached, video is ready immediately
+    if cached_job_id:
+        add_job_log(job_id, "Video ready - waiting for local worker to pick up job")
+        return {
+            "job_id": job_id,
+            "status": "ready_for_worker",
+            "cached": True,
+            "message": "Video ready! Start the worker on your PC to process."
+        }
+    
+    # Start download on Railway (only download, not transcription)
+    if youtube_url:
+        add_job_log(job_id, f"Starting YouTube download: {youtube_url[:50]}...")
+        background_tasks.add_task(
+            download_video_only,
+            job_id,
+            job_dir,
+            youtube_url,
+        )
     
     return {
         "job_id": job_id,
-        "status": "analyzing",
-        "cached": cached_job_id is not None,
-        "message": "Analyzing video for viral moments..."
+        "status": "downloading",
+        "cached": False,
+        "message": "Downloading video on Railway (fast servers). Your PC will handle the rest!"
     }
+
+
+def download_video_only(job_id: str, job_dir: Path, youtube_url: str):
+    """Download YouTube video on Railway only - transcription happens on local worker."""
+    import yt_dlp
+    
+    input_path = job_dir / "input.mp4"
+    
+    add_job_log(job_id, "Initializing yt-dlp...")
+    
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            try:
+                downloaded = d.get('downloaded_bytes', 0)
+                total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                if total > 0:
+                    pct = downloaded / total
+                    speed = d.get('speed', 0) or 0
+                    speed_mb = speed / 1024 / 1024 if speed else 0
+                    eta = d.get('eta', 0) or 0
+                    
+                    update_job_progress(
+                        job_id, "downloading", pct * 0.9,
+                        "Downloading on Railway",
+                        f"{downloaded/1024/1024:.1f}MB / {total/1024/1024:.1f}MB @ {speed_mb:.1f}MB/s (ETA: {eta}s)"
+                    )
+            except:
+                pass
+        elif d['status'] == 'finished':
+            add_job_log(job_id, "✓ Download finished, processing...", "success")
+    
+    try:
+        add_job_log(job_id, "Fetching video info from YouTube...")
+        
+        ydl_opts = {
+            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+            'outtmpl': str(input_path.with_suffix('')),
+            'merge_output_format': 'mp4',
+            'progress_hooks': [progress_hook],
+            'quiet': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(youtube_url, download=False)
+            duration = info.get('duration', 0)
+            title = info.get('title', 'Unknown')
+            add_job_log(job_id, f"Video: {title[:50]}... ({duration}s)")
+            
+            # Update estimates based on actual video duration
+            _job_progress[job_id]["estimates"]["transcribe"] = f"~{max(30, duration // 10)}s-{max(60, duration // 5)}s"
+            
+            ydl.download([youtube_url])
+        
+        # Find downloaded file
+        for ext in ['.mp4', '.mkv', '.webm', '']:
+            candidate = input_path.with_suffix(ext) if ext else input_path
+            if candidate.exists() and candidate != input_path:
+                candidate.rename(input_path)
+                break
+        
+        if input_path.exists():
+            file_size = input_path.stat().st_size / 1024 / 1024
+            add_job_log(job_id, f"✓ Video saved: {file_size:.1f}MB", "success")
+            
+            # Cache this video
+            cache_key = get_video_cache_key(youtube_url)
+            _video_cache[cache_key] = job_id
+            add_job_log(job_id, f"Video cached for future use (key: {cache_key})")
+            
+            # Update config with video URL for worker
+            _worker_job_configs[job_id]["video_url"] = f"/api/clipper/clips/{job_id}/input.mp4"
+            
+            # Mark as ready for worker
+            update_job_progress(
+                job_id, "ready_for_worker", 0.9,
+                "Ready for your PC",
+                "Video downloaded! Start the local worker to continue processing."
+            )
+            add_job_log(job_id, "✓ Ready for local worker - waiting for your PC to pick up the job", "success")
+        else:
+            raise Exception("Download completed but file not found")
+            
+    except Exception as e:
+        add_job_log(job_id, f"✗ Download failed: {str(e)}", "error")
+        update_job_progress(job_id, "failed", 0, "Download failed", str(e))
+        _job_progress[job_id]["error"] = str(e)
 
 
 def run_smart_analysis(

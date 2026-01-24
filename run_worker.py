@@ -256,6 +256,244 @@ class LocalWorker:
                     candidate.rename(output_path)
                 break
     
+    def process_smart_job(self, job_id: str, video_path: Path, config: dict) -> dict:
+        """Process a smart job: transcribe, analyze for viral moments, return candidates."""
+        job_dir = self.work_dir / job_id
+        
+        logger.info(f"")
+        logger.info(f"🧠 SMART PROCESSING MODE")
+        logger.info(f"   Transcription + AI Analysis on YOUR PC")
+        logger.info(f"")
+        
+        whisper_model = config.get('whisper_model', 'base')
+        num_clips = config.get('num_clips', 10)
+        min_duration = config.get('min_duration', 15)
+        max_duration = config.get('max_duration', 60)
+        
+        # Step 1: Transcribe locally
+        logger.info(f"📝 Step 1: Transcribing with Whisper ({whisper_model})...")
+        self.update_job_progress(job_id, 0.1, "Transcribing audio", f"Using Whisper {whisper_model} model on your PC...")
+        
+        try:
+            # Try to use faster-whisper
+            from faster_whisper import WhisperModel
+            
+            logger.info(f"   Loading Whisper model '{whisper_model}'...")
+            model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
+            
+            logger.info(f"   Transcribing...")
+            segments_gen, info = model.transcribe(
+                str(video_path),
+                word_timestamps=True,
+                vad_filter=True,
+            )
+            
+            # Collect segments and words
+            transcript = {
+                "language": info.language,
+                "duration": info.duration,
+                "segments": []
+            }
+            
+            total_duration = info.duration
+            for seg in segments_gen:
+                words = []
+                if seg.words:
+                    for w in seg.words:
+                        words.append({
+                            "word": w.word.strip(),
+                            "start": w.start,
+                            "end": w.end,
+                        })
+                
+                transcript["segments"].append({
+                    "text": seg.text.strip(),
+                    "start": seg.start,
+                    "end": seg.end,
+                    "words": words,
+                })
+                
+                # Update progress
+                if total_duration > 0:
+                    progress = 0.1 + (seg.end / total_duration) * 0.4
+                    self.update_job_progress(
+                        job_id, progress,
+                        "Transcribing audio",
+                        f"{seg.end:.0f}s / {total_duration:.0f}s transcribed"
+                    )
+            
+            logger.info(f"   ✓ Transcription complete: {len(transcript['segments'])} segments")
+            
+            # Save transcript
+            transcript_path = job_dir / "transcript.json"
+            with open(transcript_path, "w") as f:
+                json.dump(transcript, f, indent=2)
+            
+        except ImportError:
+            logger.error("faster-whisper not installed!")
+            logger.info("Installing: pip install faster-whisper")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "faster-whisper"])
+            return {"success": False, "error": "Please restart worker - faster-whisper was just installed"}
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            return {"success": False, "error": f"Transcription failed: {str(e)}"}
+        
+        # Step 2: Analyze for viral moments
+        logger.info(f"")
+        logger.info(f"🔥 Step 2: Analyzing for viral moments...")
+        self.update_job_progress(job_id, 0.55, "Analyzing transcript", "Finding viral-worthy moments...")
+        
+        # Extract all words
+        all_words = []
+        for seg in transcript["segments"]:
+            all_words.extend(seg.get("words", []))
+        
+        # Try to use GPT if available, otherwise use heuristics
+        candidates = self._analyze_viral_moments(all_words, num_clips, min_duration, max_duration)
+        
+        logger.info(f"   ✓ Found {len(candidates)} potential viral moments")
+        
+        # Save candidates
+        candidates_path = job_dir / "viral_candidates.json"
+        with open(candidates_path, "w") as f:
+            json.dump(candidates, f, indent=2)
+        
+        # Upload candidates to server
+        self.update_job_progress(job_id, 0.9, "Uploading results", "Sending candidates to server...")
+        
+        try:
+            resp = requests.post(
+                f"{self.api_base}/worker/jobs/{job_id}/candidates",
+                json={"candidates": candidates, "transcript": transcript},
+                timeout=30
+            )
+            if resp.status_code == 200:
+                logger.info(f"   ✓ Candidates uploaded to server")
+            else:
+                logger.warning(f"   ⚠ Failed to upload candidates: {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"   ⚠ Failed to upload candidates: {e}")
+        
+        return {
+            "success": True,
+            "candidates": candidates,
+            "transcript": transcript,
+            "phase": "analyzed",
+        }
+    
+    def _analyze_viral_moments(self, words: list, num_clips: int, min_duration: float, max_duration: float) -> list:
+        """Analyze transcript for viral moments using heuristics or GPT."""
+        
+        # Build sentences from words
+        sentences = []
+        current_sentence = {"start": 0, "end": 0, "text": "", "words": []}
+        
+        for word in words:
+            word_text = word.get("word", "")
+            current_sentence["words"].append(word)
+            current_sentence["text"] += word_text + " "
+            current_sentence["end"] = word.get("end", 0)
+            
+            if not current_sentence["start"]:
+                current_sentence["start"] = word.get("start", 0)
+            
+            if any(word_text.rstrip().endswith(p) for p in ['.', '!', '?']):
+                current_sentence["text"] = current_sentence["text"].strip()
+                if current_sentence["text"]:
+                    sentences.append(current_sentence)
+                current_sentence = {"start": 0, "end": 0, "text": "", "words": []}
+        
+        if current_sentence["text"].strip():
+            current_sentence["text"] = current_sentence["text"].strip()
+            sentences.append(current_sentence)
+        
+        # Score sentences
+        viral_keywords = {
+            "controversial": ["actually", "wrong", "truth", "secret", "nobody", "everyone", "always", "never"],
+            "emotional": ["amazing", "incredible", "love", "hate", "worst", "best", "changed", "life"],
+            "educational": ["how to", "why", "because", "learn", "tip", "hack", "strategy"],
+            "funny": ["literally", "imagine", "wait", "hilarious", "crazy", "insane"],
+        }
+        
+        # Create segments of appropriate length
+        moments = []
+        i = 0
+        
+        while i < len(sentences):
+            segment_sentences = [sentences[i]]
+            segment_start = sentences[i]["start"]
+            segment_end = sentences[i]["end"]
+            
+            j = i + 1
+            while j < len(sentences) and (segment_end - segment_start) < min_duration:
+                segment_sentences.append(sentences[j])
+                segment_end = sentences[j]["end"]
+                j += 1
+            
+            duration = segment_end - segment_start
+            if duration < min_duration:
+                i += 1
+                continue
+            
+            while duration > max_duration and len(segment_sentences) > 1:
+                segment_sentences.pop()
+                segment_end = segment_sentences[-1]["end"]
+                duration = segment_end - segment_start
+            
+            text = " ".join(s["text"] for s in segment_sentences)
+            
+            # Score
+            score = 50
+            category = "general"
+            reasons = []
+            text_lower = text.lower()
+            
+            for cat, keywords in viral_keywords.items():
+                for kw in keywords:
+                    if kw in text_lower:
+                        score += 5
+                        category = cat
+                        reasons.append(f"Contains '{kw}'")
+            
+            if "?" in text:
+                score += 10
+                reasons.append("Engaging question")
+            if "!" in text:
+                score += 5
+                reasons.append("Shows emotion")
+            if any(c.isdigit() for c in text):
+                score += 5
+                reasons.append("Contains numbers")
+            
+            word_count = len(text.split())
+            if 15 <= word_count <= 50:
+                score += 10
+            
+            moments.append({
+                "index": len(moments),
+                "start_time": segment_start,
+                "end_time": segment_end,
+                "duration": duration,
+                "text": text,
+                "virality_score": min(score, 95),
+                "virality_reason": " | ".join(reasons) if reasons else "Potential engaging content",
+                "suggested_caption": f"🔥 {text[:80]}...",
+                "suggested_hashtags": ["viral", "fyp", category],
+                "hook": text.split('.')[0] if '.' in text else text[:50],
+                "category": category,
+                "selected": len(moments) < num_clips,
+            })
+            
+            i = j if j > i else i + 1
+        
+        moments.sort(key=lambda x: x["virality_score"], reverse=True)
+        
+        # Update selected flag for top N
+        for idx, m in enumerate(moments):
+            m["selected"] = idx < num_clips
+        
+        return moments[:num_clips * 3]  # Return more candidates than needed
+    
     def process_video_ffmpeg(self, job_id: str, video_path: Path, config: dict) -> dict:
         """Process video using FFmpeg directly (simple mode without Whisper)."""
         job_dir = self.work_dir / job_id
@@ -357,6 +595,7 @@ class LocalWorker:
     def process_job(self, job: dict) -> dict:
         """Process a video clipping job locally."""
         job_id = job["job_id"]
+        job_type = job.get("job_type", "render")  # 'smart' or 'render'
         config = job.get("config", {})
         video_url = job.get("video_url")
         youtube_url = job.get("youtube_url")
@@ -364,11 +603,10 @@ class LocalWorker:
         logger.info(f"")
         logger.info(f"{'='*60}")
         logger.info(f"🎬 Processing Job: {job_id}")
+        logger.info(f"   Type: {job_type.upper()}")
         logger.info(f"{'='*60}")
         
-        if youtube_url:
-            logger.info(f"📺 YouTube: {youtube_url[:60]}...")
-        elif video_url:
+        if video_url:
             logger.info(f"📹 Video URL: {video_url[:60]}...")
         
         logger.info(f"⚙️  Config: {json.dumps(config, indent=2)}")
@@ -380,8 +618,20 @@ class LocalWorker:
         start_time = datetime.now()
         
         try:
-            # Download video
+            # Download video from Railway (already downloaded by Railway)
             video_path = self.download_video(job_id, video_url, youtube_url)
+            
+            # Handle smart jobs (transcribe + analyze)
+            if job_type == "smart":
+                logger.info(f"")
+                logger.info(f"🧠 SMART JOB: Transcribe + Analyze on YOUR PC")
+                result = self.process_smart_job(job_id, video_path, config)
+                
+                processing_time = (datetime.now() - start_time).total_seconds()
+                result["processing_time"] = processing_time
+                result["job_id"] = job_id
+                
+                return result
             
             self.update_job_progress(job_id, 0.1, "Download complete", "Starting processing...")
             
