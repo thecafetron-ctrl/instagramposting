@@ -1367,19 +1367,38 @@ def run_full_railway_processing(
 ):
     """Run the FULL pipeline on Railway - download, transcribe, analyze, render."""
     import json
-    from .transcribe import transcribe_video
-    from .render import render_final_clip, create_thumbnail
-    from .captions import generate_ass_subtitle
+    import traceback
+    
+    logger.info(f"🚀 Starting full Railway processing for job {job_id}")
+    add_job_log(job_id, "🚀 Background task started")
+    update_job_progress(job_id, "processing", 0.02, "Starting", "Initializing pipeline...")
     
     try:
+        # Import inside function to catch import errors
+        try:
+            from .transcribe import transcribe_video
+            from .render import render_final_clip, create_thumbnail
+            from .captions import generate_ass_subtitle
+            add_job_log(job_id, "✓ Modules loaded")
+        except Exception as e:
+            logger.error(f"Import error: {e}")
+            add_job_log(job_id, f"✗ Import failed: {e}", "error")
+            update_job_progress(job_id, "failed", 0, "Import failed", str(e))
+            return
+        
         input_path = job_dir / "input.mp4"
         transcript_path = job_dir / "transcript.json"
         
         # Step 1: Download if needed
         if youtube_url and not input_path.exists():
-            import yt_dlp
+            try:
+                import yt_dlp
+            except ImportError as e:
+                add_job_log(job_id, f"✗ yt-dlp not installed: {e}", "error")
+                update_job_progress(job_id, "failed", 0, "yt-dlp missing", "yt-dlp package not installed")
+                return
             
-            add_job_log(job_id, "Downloading from YouTube...")
+            add_job_log(job_id, f"Downloading from YouTube: {youtube_url}")
             update_job_progress(job_id, "processing", 0.05, "Downloading", "Fetching video from YouTube...")
             
             def progress_hook(d):
