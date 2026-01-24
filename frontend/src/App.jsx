@@ -1535,18 +1535,42 @@ function VideoClipperPage() {
   
   const startSmartPolling = (jobId) => {
     if (pollInterval) clearInterval(pollInterval)
+    let notFoundCount = 0
     
     const interval = setInterval(async () => {
       try {
         // Fetch job status
         const res = await fetch(`${API_BASE}/clipper/job/${jobId}`)
+        
+        // Handle 404 - job not found (server may have restarted)
+        if (res.status === 404) {
+          notFoundCount++
+          console.warn(`Job ${jobId} not found (attempt ${notFoundCount})`)
+          
+          if (notFoundCount >= 3) {
+            clearInterval(interval)
+            setPollInterval(null)
+            setCurrentJob(prev => ({ 
+              ...prev, 
+              status: 'failed',
+              error: 'Job lost - server may have restarted. Please try again.' 
+            }))
+            setClipperPhase('input')
+            return
+          }
+          return // Wait and retry
+        }
+        
+        notFoundCount = 0 // Reset on success
         const data = await res.json()
         
         // Also fetch logs
         try {
           const logsRes = await fetch(`${API_BASE}/clipper/job/${jobId}/logs`)
-          const logsData = await logsRes.json()
-          setJobLogs(logsData.logs || [])
+          if (logsRes.ok) {
+            const logsData = await logsRes.json()
+            setJobLogs(logsData.logs || [])
+          }
         } catch (e) {}
         
         setCurrentJob(prev => ({

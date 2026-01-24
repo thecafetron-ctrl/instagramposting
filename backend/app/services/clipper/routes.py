@@ -1423,7 +1423,8 @@ def run_full_railway_processing(
             from .transcribe import transcribe_video
             from .render import render_final_clip, create_thumbnail
             from .captions import generate_ass_subtitles
-            add_job_log(job_id, "✓ Modules loaded")
+            from .ai_editor import AIVideoEditor
+            add_job_log(job_id, "✓ All modules loaded (including AI editor)")
         except Exception as e:
             logger.error(f"Import error: {e}")
             add_job_log(job_id, f"✗ Import failed: {e}", "error")
