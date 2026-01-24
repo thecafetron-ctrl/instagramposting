@@ -1378,7 +1378,7 @@ def run_full_railway_processing(
         try:
             from .transcribe import transcribe_video
             from .render import render_final_clip, create_thumbnail
-            from .captions import generate_ass_subtitle
+            from .captions import generate_ass_subtitles
             add_job_log(job_id, "✓ Modules loaded")
         except Exception as e:
             logger.error(f"Import error: {e}")
@@ -1524,16 +1524,25 @@ def run_full_railway_processing(
             # Generate captions if needed
             ass_path = None
             if burn_captions:
+                from .transcribe import Word
+                from .captions import get_style_preset
                 clip_words = [
-                    w for w in words
+                    Word(
+                        word=w.get("word", ""),
+                        start=w.get("start", 0),
+                        end=w.get("end", 0),
+                        confidence=w.get("confidence", 1.0)
+                    )
+                    for w in words
                     if clip["start_time"] <= w.get("start", 0) <= clip["end_time"]
                 ]
                 if clip_words:
                     ass_path = clips_dir / f"{clip_name}.ass"
-                    generate_ass_subtitle(
+                    style = get_style_preset(caption_style)
+                    generate_ass_subtitles(
                         clip_words, str(ass_path),
-                        style_name=caption_style,
-                        offset=-clip["start_time"],
+                        style=style,
+                        time_offset=-clip["start_time"],
                     )
             
             render_final_clip(
@@ -2058,7 +2067,7 @@ def render_smart_clips(
     """Render the selected clips."""
     import json
     from .render import render_final_clip, create_thumbnail
-    from .captions import generate_ass_subtitle
+    from .captions import generate_ass_subtitles
     
     try:
         input_path = job_dir / "input.mp4"
@@ -2093,19 +2102,28 @@ def render_smart_clips(
             # Generate captions for this clip if needed
             ass_path = None
             if burn_captions and transcript:
-                # Filter words for this clip's time range
+                from .transcribe import Word
+                from .captions import get_style_preset
+                # Filter words for this clip's time range and convert to Word objects
                 clip_words = [
-                    w for w in transcript.get("words", [])
+                    Word(
+                        word=w.get("word", ""),
+                        start=w.get("start", 0),
+                        end=w.get("end", 0),
+                        confidence=w.get("confidence", 1.0)
+                    )
+                    for w in transcript.get("words", [])
                     if clip["start_time"] <= w.get("start", 0) <= clip["end_time"]
                 ]
                 
                 if clip_words:
                     ass_path = clips_dir / f"{clip_name}.ass"
-                    generate_ass_subtitle(
+                    style = get_style_preset(caption_style)
+                    generate_ass_subtitles(
                         clip_words,
                         str(ass_path),
-                        style_name=caption_style,
-                        offset=-clip["start_time"],  # Adjust timestamps
+                        style=style,
+                        time_offset=-clip["start_time"],
                     )
             
             # Render the clip
