@@ -1,0 +1,26 @@
+#!/bin/bash
+# Clipper Worker Launcher - triggered by clipperworker:// URL scheme
+
+# Get the directory where the app bundle is located
+APP_DIR="$(dirname "$(dirname "$(dirname "$0")")")"
+PROJECT_DIR="$(dirname "$APP_DIR")"
+
+# If project dir doesn't have run_worker.py, try to find it
+if [ ! -f "$PROJECT_DIR/run_worker.py" ]; then
+    # Try common locations
+    if [ -f "$HOME/instagram post creator/run_worker.py" ]; then
+        PROJECT_DIR="$HOME/instagram post creator"
+    elif [ -f "$HOME/Desktop/instagram post creator/run_worker.py" ]; then
+        PROJECT_DIR="$HOME/Desktop/instagram post creator"
+    elif [ -f "$HOME/Documents/instagram post creator/run_worker.py" ]; then
+        PROJECT_DIR="$HOME/Documents/instagram post creator"
+    fi
+fi
+
+# Open Terminal and run the worker
+osascript <<EOF
+tell application "Terminal"
+    activate
+    do script "cd \"$PROJECT_DIR\" && echo '🎬 Starting Clipper Worker...' && python3 run_worker.py https://instagramposting-production-4e91.up.railway.app"
+end tell
+EOF

@@ -1753,25 +1753,41 @@ function VideoClipperPage() {
           <div className="worker-info">
             <p><strong>How it works:</strong> Jobs are queued on Railway, but processed on YOUR computer using your GPU/CPU.</p>
             
-            <div className="worker-start-options">
-              <div className="worker-option">
-                <h4>🖱️ Easy Way (Double-Click)</h4>
-                <p>Find and double-click <code>Start Worker.command</code> (Mac) or <code>Start Worker.bat</code> (Windows) in your project folder.</p>
+            {workerStatus?.workers_online > 0 ? (
+              <div className="worker-ready">
+                <span className="ready-icon">✅</span>
+                <span>Worker is running and ready to process jobs!</span>
               </div>
-              
-              <details>
-                <summary>⌨️ Manual Way (Terminal)</summary>
-                <ol>
-                  <li>Open Terminal</li>
-                  <li>Navigate to your project folder</li>
-                  <li>Run the command below:</li>
-                </ol>
-                <pre className="worker-command">python run_worker.py {window.location.origin}</pre>
-              </details>
-            </div>
-            
-            {workerStatus?.workers_online === 0 && (
-              <p className="worker-warning">⚠️ No workers connected. Start the worker on your PC to process jobs.</p>
+            ) : (
+              <div className="worker-start-section">
+                <button 
+                  className="btn btn-start-worker"
+                  onClick={() => {
+                    window.location.href = 'clipperworker://start'
+                    // Show hint after a moment
+                    setTimeout(() => {
+                      if (workerStatus?.workers_online === 0) {
+                        alert('If nothing happened, you need to run the one-time setup first:\n\n1. Open your project folder\n2. Double-click "Install Worker.command"\n3. Then try again!')
+                      }
+                    }, 2000)
+                  }}
+                >
+                  🚀 Start Worker on My Computer
+                </button>
+                
+                <details className="worker-setup-details">
+                  <summary>⚙️ First time? One-time setup required</summary>
+                  <div className="setup-steps">
+                    <p>Run this once to enable the Start Worker button:</p>
+                    <ol>
+                      <li>Open your project folder in Finder</li>
+                      <li>Double-click <code>Install Worker.command</code></li>
+                      <li>Follow the prompts</li>
+                    </ol>
+                    <p className="setup-note">After setup, clicking "Start Worker" will automatically launch the worker!</p>
+                  </div>
+                </details>
+              </div>
             )}
           </div>
         )}
