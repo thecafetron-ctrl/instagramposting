@@ -1225,6 +1225,9 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
         elif d['status'] == 'finished':
             update_job_progress(job_id, "downloading", 0.95, "Download complete", "Preparing for worker...")
     
+    download_success = False
+    
+    # Try yt-dlp first
     try:
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
@@ -1244,7 +1247,29 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([youtube_url])
+        download_success = True
+    except Exception as yt_err:
+        logger.warning(f"yt-dlp failed, trying pytubefix: {yt_err}")
         
+        # Fallback to pytubefix
+        try:
+            from pytubefix import YouTube
+            yt = YouTube(youtube_url)
+            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+            if not stream:
+                stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+            if stream:
+                stream.download(output_path=str(job_dir), filename="input.mp4")
+                download_success = True
+            else:
+                raise Exception("No suitable stream found")
+        except Exception as pt_err:
+            logger.error(f"Both downloaders failed: yt-dlp={yt_err}, pytubefix={pt_err}")
+            update_job_progress(job_id, "failed", 0, "Download failed", str(yt_err))
+            _job_progress[job_id]["error"] = str(yt_err)
+            return
+    
+    if download_success:
         # Find the downloaded file (might have different extension)
         for ext in ['.mp4', '.mkv', '.webm', '']:
             candidate = input_path.with_suffix(ext) if ext else input_path
@@ -1253,17 +1278,14 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
                 break
         
         if not input_path.exists():
-            # Check for file without extension
             no_ext = job_dir / "input"
             if no_ext.exists():
                 no_ext.rename(input_path)
         
         if input_path.exists():
-            # Update config with local video URL
             _worker_job_configs[job_id]["video_url"] = f"/api/clipper/clips/{job_id}/input.mp4"
-            _worker_job_configs[job_id]["youtube_url"] = None  # Clear YouTube URL so worker uses local file
+            _worker_job_configs[job_id]["youtube_url"] = None
             
-            # Now queue for worker
             update_job_progress(
                 job_id, "queued", 0,
                 "Ready for your PC",
@@ -1271,12 +1293,8 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
             )
             logger.info(f"YouTube download complete for {job_id}, queued for worker")
         else:
-            raise Exception("Download completed but file not found")
-            
-    except Exception as e:
-        logger.exception(f"YouTube download failed for {job_id}")
-        update_job_progress(job_id, "failed", 0, "Download failed", str(e))
-        _job_progress[job_id]["error"] = str(e)
+            update_job_progress(job_id, "failed", 0, "Download failed", "File not found after download")
+            _job_progress[job_id]["error"] = "File not found after download"
 
 
 # ============================================================================
@@ -1577,17 +1595,44 @@ def run_full_railway_processing(
                     
             except Exception as dl_err:
                 error_msg = str(dl_err)
-                add_job_log(job_id, f"✗ Download error: {error_msg}", "error")
-                logger.error(f"yt-dlp download failed: {dl_err}")
+                add_job_log(job_id, f"✗ yt-dlp failed: {error_msg}", "warning")
+                logger.warning(f"yt-dlp download failed, trying pytubefix: {dl_err}")
                 
-                # Try to give helpful error messages
-                if "403" in error_msg:
-                    add_job_log(job_id, "This video may have age/region restrictions. Try a different video.", "error")
-                elif "private" in error_msg.lower():
-                    add_job_log(job_id, "This video is private and cannot be downloaded.", "error")
-                
-                update_job_progress(job_id, "failed", 0, "Download failed", error_msg[:200])
-                return
+                # FALLBACK: Try pytubefix when yt-dlp fails
+                add_job_log(job_id, "🔄 Trying alternative downloader (pytubefix)...", "info")
+                try:
+                    from pytubefix import YouTube
+                    from pytubefix.cli import on_progress
+                    
+                    yt = YouTube(youtube_url, on_progress_callback=on_progress)
+                    add_job_log(job_id, f"Video found: {yt.title} ({yt.length}s)")
+                    
+                    # Get highest resolution stream that's progressive (has audio)
+                    stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+                    
+                    if not stream:
+                        # Try adaptive stream
+                        stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+                    
+                    if stream:
+                        add_job_log(job_id, f"Downloading: {stream.resolution} {stream.mime_type}")
+                        stream.download(output_path=str(job_dir), filename="input.mp4")
+                        add_job_log(job_id, "✓ Download complete via pytubefix!", "success")
+                    else:
+                        raise Exception("No suitable stream found")
+                        
+                except Exception as pytube_err:
+                    add_job_log(job_id, f"✗ pytubefix also failed: {pytube_err}", "error")
+                    logger.error(f"Both downloaders failed: yt-dlp={dl_err}, pytubefix={pytube_err}")
+                    
+                    # Give helpful error messages
+                    if "403" in error_msg or "403" in str(pytube_err):
+                        add_job_log(job_id, "⚠️ YouTube is blocking this download. Try a different video or try again later.", "error")
+                    elif "private" in error_msg.lower() or "private" in str(pytube_err).lower():
+                        add_job_log(job_id, "This video is private.", "error")
+                    
+                    update_job_progress(job_id, "failed", 0, "Download failed", f"Both yt-dlp and pytubefix failed: {error_msg[:100]}")
+                    return
             
             # Find downloaded file - check all files in directory
             add_job_log(job_id, f"Looking for downloaded file in {job_dir}")
@@ -2165,12 +2210,37 @@ def run_smart_analysis(
                 'source_address': '0.0.0.0',
             }
             
+            download_ok = False
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([youtube_url])
+                download_ok = True
             except Exception as dl_err:
-                logger.error(f"yt-dlp download failed: {dl_err}")
-                update_job_progress(job_id, "failed", 0, "Download failed", str(dl_err))
+                logger.warning(f"yt-dlp failed, trying pytubefix: {dl_err}")
+                add_job_log(job_id, f"yt-dlp failed, trying alternative...", "warning")
+                
+                # Fallback to pytubefix
+                try:
+                    from pytubefix import YouTube
+                    yt = YouTube(youtube_url)
+                    stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+                    if not stream:
+                        stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+                    if stream:
+                        add_job_log(job_id, f"Downloading via pytubefix: {stream.resolution}")
+                        stream.download(output_path=str(job_dir), filename="input.mp4")
+                        download_ok = True
+                        add_job_log(job_id, "✓ Download complete!", "success")
+                    else:
+                        raise Exception("No suitable stream")
+                except Exception as pt_err:
+                    logger.error(f"Both failed: yt-dlp={dl_err}, pytubefix={pt_err}")
+                    add_job_log(job_id, f"Both downloaders failed", "error")
+                    update_job_progress(job_id, "failed", 0, "Download failed", str(dl_err))
+                    return
+            
+            if not download_ok:
+                update_job_progress(job_id, "failed", 0, "Download failed", "Unknown error")
                 return
             
             # Find downloaded file
