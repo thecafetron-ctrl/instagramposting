@@ -3451,3 +3451,337 @@
   flex: 1;
   font-size: 0.75rem;
 }
+
+/* Style Panel */
+.style-toggle-btn {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  font-size: 1rem;
+}
+
+.style-panel {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.style-section {
+  margin-bottom: 2rem;
+}
+
+.style-section:last-child {
+  margin-bottom: 0;
+}
+
+.style-section h4 {
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  color: var(--color-text);
+}
+
+.style-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.75rem;
+}
+
+/* Video Vibe Grid */
+.vibe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.vibe-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.vibe-card:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.vibe-card.selected {
+  border-color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), 0.15);
+}
+
+.vibe-emoji {
+  font-size: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.vibe-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.vibe-desc {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* Animation Grid */
+.animation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 0.75rem;
+}
+
+.animation-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.animation-card:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.animation-card.selected {
+  border-color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), 0.15);
+}
+
+.animation-preview {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.animation-preview span {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+/* Animation preview effects */
+.anim-karaoke span {
+  animation: karaoke-preview 2s ease infinite;
+}
+
+.anim-pop span {
+  animation: pop-preview 1s ease infinite;
+}
+
+.anim-typewriter span {
+  border-right: 2px solid currentColor;
+  animation: typewriter-preview 1.5s steps(6) infinite;
+}
+
+.anim-bounce span {
+  animation: bounce-preview 0.8s ease infinite;
+}
+
+.anim-fade span {
+  animation: fade-preview 2s ease infinite;
+}
+
+@keyframes karaoke-preview {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes pop-preview {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+@keyframes typewriter-preview {
+  0%, 100% { width: 0; overflow: hidden; }
+  50% { width: 100%; }
+}
+
+@keyframes bounce-preview {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes fade-preview {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.animation-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+.animation-desc {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* Color Pickers */
+.colors-section {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 1rem;
+  border-radius: 10px;
+}
+
+.color-pickers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.color-picker-group label {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+  color: var(--color-text-secondary);
+}
+
+.color-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.color-input-row input[type="color"] {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.color-presets {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.color-preset {
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.color-preset:hover {
+  transform: scale(1.1);
+}
+
+.color-preset.selected {
+  border-color: white;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+/* Live Caption Preview */
+.caption-live-preview {
+  margin-top: 1.5rem;
+}
+
+.phone-mockup {
+  max-width: 200px;
+  margin: 0 auto;
+  background: #1a1a1a;
+  border-radius: 24px;
+  padding: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+}
+
+.phone-screen {
+  background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+  border-radius: 18px;
+  height: 350px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.phone-screen::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, transparent 60%, rgba(0,0,0,0.5));
+}
+
+.preview-caption {
+  position: relative;
+  z-index: 1;
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 0 1rem;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.highlight-word {
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+
+/* Title Grid */
+.title-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.title-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.title-card:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.title-card.selected {
+  border-color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), 0.15);
+}
+
+.title-preview {
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.title-name {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}

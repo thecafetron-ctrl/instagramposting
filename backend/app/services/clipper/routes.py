@@ -1307,6 +1307,14 @@ async def smart_analyze_full_railway(
     crop_vertical: bool = Form(True),
     auto_center: bool = Form(True),
     caption_style: str = Form("default"),
+    # New style settings
+    caption_animation: str = Form("karaoke"),
+    caption_color: str = Form("#FFFFFF"),
+    animation_color: str = Form("#FFFF00"),
+    title_style: str = Form("bold"),
+    title_color: str = Form("#FFFF00"),
+    video_vibe: str = Form("default"),
+    manual_topic_select: bool = Form(False),
 ):
     """
     FULL Railway processing - download, transcribe, analyze, ALL on Railway.
@@ -1341,7 +1349,7 @@ async def smart_analyze_full_railway(
             else:
                 cached_job_id = None
     
-    # Store config
+    # Store config including style settings
     _worker_job_configs[job_id] = {
         "youtube_url": youtube_url,
         "config": {
@@ -1353,6 +1361,14 @@ async def smart_analyze_full_railway(
             "crop_vertical": crop_vertical,
             "auto_center": auto_center,
             "caption_style": caption_style,
+            # Style settings
+            "caption_animation": caption_animation,
+            "caption_color": caption_color,
+            "animation_color": animation_color,
+            "title_style": title_style,
+            "title_color": title_color,
+            "video_vibe": video_vibe,
+            "manual_topic_select": manual_topic_select,
         }
     }
     
@@ -1375,7 +1391,17 @@ async def smart_analyze_full_railway(
         add_job_log(job_id, f"✓ Uploaded {len(content)/1024/1024:.1f}MB", "success")
         _job_progress[job_id]["progress"] = 0.1
     
-    # Start full processing
+    # Start full processing with style settings
+    style_config = {
+        "caption_animation": caption_animation,
+        "caption_color": caption_color,
+        "animation_color": animation_color,
+        "title_style": title_style,
+        "title_color": title_color,
+        "video_vibe": video_vibe,
+        "manual_topic_select": manual_topic_select,
+    }
+    
     background_tasks.add_task(
         run_full_railway_processing,
         job_id,
@@ -1390,12 +1416,14 @@ async def smart_analyze_full_railway(
         auto_center,
         caption_style,
         cached_job_id is not None,
+        style_config,
     )
     
     return {
         "job_id": job_id,
         "status": "processing",
         "cached": cached_job_id is not None,
+        "manual_select": manual_topic_select,  # Let frontend know if we'll show topics
         "message": "Processing on Railway - sit back and relax!"
     }
 
@@ -1413,8 +1441,20 @@ def run_full_railway_processing(
     auto_center: bool,
     caption_style: str,
     is_cached: bool,
+    style_config: dict = None,
 ):
     """Run the FULL pipeline on Railway - download, transcribe, analyze, render."""
+    # Default style config
+    if style_config is None:
+        style_config = {
+            "caption_animation": "karaoke",
+            "caption_color": "#FFFFFF",
+            "animation_color": "#FFFF00",
+            "title_style": "bold",
+            "title_color": "#FFFF00",
+            "video_vibe": "default",
+            "manual_topic_select": False,
+        }
     import json
     import traceback
     
@@ -1570,11 +1610,12 @@ def run_full_railway_processing(
             has_audio_fx = False
             add_job_log(job_id, f"Audio effects unavailable: {e}", "warning")
         
-        # Initialize AI editor
+        # Initialize AI editor with style config
         ai_editor = AIVideoEditor(
             enable_effects=True,
             enable_music=False,  # We'll add music via audio_effects module
             caption_style="dynamic",
+            style_config=style_config,
         )
         
         # Initialize progressive results storage

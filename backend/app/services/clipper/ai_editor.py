@@ -346,6 +346,48 @@ def generate_dynamic_caption_effects(words: List[dict], moments: List[ClipMoment
     return effects
 
 
+def hex_to_ass_color(hex_color: str) -> str:
+    """Convert hex color (#RRGGBB) to ASS color (&HBBGGRR&)."""
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) == 6:
+        r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
+        return f"&H00{b}{g}{r}&"
+    return "&H00FFFFFF&"
+
+
+def generate_ass_header(
+    caption_color: str = "#FFFFFF",
+    animation_color: str = "#FFFF00",
+    title_color: str = "#FFFF00",
+) -> str:
+    """Generate ASS header with custom colors."""
+    # Convert colors
+    main_color = hex_to_ass_color(caption_color)
+    highlight_color = hex_to_ass_color(animation_color)
+    header_color = hex_to_ass_color(title_color)
+    
+    # ASS header with CENTERED styles (Alignment 5 = center middle)
+    # MarginV of 600 puts captions slightly below center (middle-lower)
+    return f"""[Script Info]
+Title: Dynamic Captions
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Montserrat ExtraBold,80,{main_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
+Style: Hook,Montserrat ExtraBold,90,{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,6,4,5,40,40,600,1
+Style: Peak,Montserrat ExtraBold,85,{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
+Style: Emphasis,Montserrat ExtraBold,95,{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,110,110,0,0,1,6,4,5,40,40,600,1
+Style: Header,Montserrat ExtraBold,110,{header_color},&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,200,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+
 def generate_enhanced_ass_subtitle(
     words: List[dict],
     output_path: Path,
@@ -353,6 +395,10 @@ def generate_enhanced_ass_subtitle(
     style: str = "dynamic",
     time_offset: float = 0,
     use_ai: bool = True,
+    caption_color: str = "#FFFFFF",
+    animation_color: str = "#FFFF00",
+    title_color: str = "#FFFF00",
+    caption_animation: str = "karaoke",
 ) -> Path:
     """
     Generate ASS subtitles with dynamic effects based on content.
@@ -375,6 +421,9 @@ def generate_enhanced_ass_subtitle(
     effects = generate_dynamic_caption_effects(words, moments)
     effect_map = {e.word_index: e for e in effects}
     
+    # Use custom animation color
+    custom_color_code = hex_to_ass_color(animation_color).replace("&H00", "\\c&H").replace("&", "&")
+    
     # Merge AI emphasis with rule-based (AI takes priority)
     color_map = {
         "yellow": "\\c&H00FFFF&",
@@ -386,7 +435,8 @@ def generate_enhanced_ass_subtitle(
     }
     
     for idx, emphasis in ai_emphasis.items():
-        color_code = color_map.get(emphasis.get("color", "yellow"), "\\c&H00FFFF&")
+        # Use custom animation color instead of preset
+        color_code = custom_color_code if emphasis.get("style") in ["pop", "highlight"] else color_map.get(emphasis.get("color", "yellow"), custom_color_code)
         effect_map[idx] = CaptionEffect(
             word_index=idx,
             effect_type=emphasis.get("style", "pop"),
@@ -394,26 +444,8 @@ def generate_enhanced_ass_subtitle(
             color=color_code,
         )
     
-    # ASS header with CENTERED styles (Alignment 5 = center middle)
-    # MarginV of 400 puts it roughly in middle of 1920px vertical video
-    ass_content = """[Script Info]
-Title: Dynamic Captions
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-WrapStyle: 0
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Montserrat ExtraBold,80,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,500,1
-Style: Hook,Montserrat ExtraBold,90,&H00FFFF00,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,6,4,5,40,40,500,1
-Style: Peak,Montserrat ExtraBold,85,&H0000FF00,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,500,1
-Style: Emphasis,Montserrat ExtraBold,95,&H00FF00FF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,110,110,0,0,1,6,4,5,40,40,500,1
-Style: Header,Montserrat ExtraBold,110,&H0000FFFF,&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,200,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
+    # Generate header with custom colors
+    ass_content = generate_ass_header(caption_color, animation_color, title_color)
     
     # Group words into lines (max 6 words per line)
     lines = []
@@ -937,6 +969,7 @@ class AIVideoEditor:
     Features:
     - Smart clip selection with hooks and endings (AI-powered)
     - Dynamic animated captions (AI-analyzed emphasis)
+    - Customizable caption colors and animations
     - Background music with ducking
     - Video effects (zoom, color grading)
     - Automatic content analysis with GPT
@@ -949,6 +982,7 @@ class AIVideoEditor:
         enable_music: bool = True,
         caption_style: str = "dynamic",
         use_ai: bool = True,
+        style_config: dict = None,
     ):
         self.music_dir = music_dir
         self.enable_effects = enable_effects
@@ -956,6 +990,16 @@ class AIVideoEditor:
         self.caption_style = caption_style
         self.use_ai = use_ai
         self.client = get_openai_client() if use_ai else None
+        
+        # Style configuration with defaults
+        self.style_config = style_config or {
+            "caption_animation": "karaoke",
+            "caption_color": "#FFFFFF",
+            "animation_color": "#FFFF00",
+            "title_style": "bold",
+            "title_color": "#FFFF00",
+            "video_vibe": "default",
+        }
         
         # Default music tracks (royalty-free paths if available)
         self.music_tracks = []
@@ -1063,7 +1107,7 @@ class AIVideoEditor:
             if start_time <= w.get("start", 0) <= end_time
         ]
         
-        # Generate AI-powered captions
+        # Generate AI-powered captions with custom styles
         ass_path = None
         if burn_captions and clip_words:
             ass_path = output_path.with_suffix('.ass')
@@ -1073,7 +1117,11 @@ class AIVideoEditor:
                 moments,
                 style=self.caption_style,
                 time_offset=0,
-                use_ai=self.use_ai,  # Enable AI caption analysis
+                use_ai=self.use_ai,
+                caption_color=self.style_config.get("caption_color", "#FFFFFF"),
+                animation_color=self.style_config.get("animation_color", "#FFFF00"),
+                title_color=self.style_config.get("title_color", "#FFFF00"),
+                caption_animation=self.style_config.get("caption_animation", "karaoke"),
             )
         
         # Build effects filter

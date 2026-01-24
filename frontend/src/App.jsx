@@ -1405,15 +1405,27 @@ function VideoClipperPage() {
   const [burnCaptions, setBurnCaptions] = useState(savedSettings?.burnCaptions ?? true)
   const [cropVertical, setCropVertical] = useState(savedSettings?.cropVertical ?? true)
   const [autoCenter, setAutoCenter] = useState(savedSettings?.autoCenter ?? true)
+  
+  // New style settings
+  const [captionAnimation, setCaptionAnimation] = useState(savedSettings?.captionAnimation ?? 'karaoke')
+  const [captionColor, setCaptionColor] = useState(savedSettings?.captionColor ?? '#FFFFFF')
+  const [animationColor, setAnimationColor] = useState(savedSettings?.animationColor ?? '#FFFF00')
+  const [titleStyle, setTitleStyle] = useState(savedSettings?.titleStyle ?? 'bold')
+  const [titleColor, setTitleColor] = useState(savedSettings?.titleColor ?? '#FFFF00')
+  const [videoVibe, setVideoVibe] = useState(savedSettings?.videoVibe ?? 'default')
+  const [manualTopicSelect, setManualTopicSelect] = useState(savedSettings?.manualTopicSelect ?? false)
+  const [showStylePanel, setShowStylePanel] = useState(false)
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
     const settings = {
       numClips, minDuration, maxDuration, pauseThreshold,
-      captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter
+      captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter,
+      captionAnimation, captionColor, animationColor, titleStyle, titleColor,
+      videoVibe, manualTopicSelect
     }
     localStorage.setItem('clipper_settings', JSON.stringify(settings))
-  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter])
+  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, captionAnimation, captionColor, animationColor, titleStyle, titleColor, videoVibe, manualTopicSelect])
 
   useEffect(() => {
     checkClipperStatus()
@@ -1502,7 +1514,17 @@ function VideoClipperPage() {
       formData.append('min_duration', minDuration)
       formData.append('max_duration', maxDuration)
       formData.append('whisper_model', whisperModel)
-      formData.append('use_local_worker', 'false')  // Always use Railway
+      formData.append('burn_captions', burnCaptions)
+      formData.append('crop_vertical', cropVertical)
+      formData.append('auto_center', autoCenter)
+      // Style settings
+      formData.append('caption_animation', captionAnimation)
+      formData.append('caption_color', captionColor)
+      formData.append('animation_color', animationColor)
+      formData.append('title_style', titleStyle)
+      formData.append('title_color', titleColor)
+      formData.append('video_vibe', videoVibe)
+      formData.append('manual_topic_select', manualTopicSelect)
 
       const res = await fetch(`${API_BASE}/clipper/smart/analyze-full`, {
         method: 'POST',
@@ -2047,7 +2069,195 @@ function VideoClipperPage() {
             />
             <span>Auto-center on motion</span>
           </label>
+          <label className="checkbox-label">
+            <input 
+              type="checkbox" 
+              checked={manualTopicSelect}
+              onChange={(e) => setManualTopicSelect(e.target.checked)}
+            />
+            <span>Let me choose viral topics (shows list to pick from)</span>
+          </label>
         </div>
+        
+        {/* Style Customization Button */}
+        <button 
+          className="btn btn-secondary style-toggle-btn"
+          onClick={() => setShowStylePanel(!showStylePanel)}
+        >
+          🎨 {showStylePanel ? 'Hide' : 'Customize'} Caption & Title Styles
+        </button>
+        
+        {/* Style Panel */}
+        {showStylePanel && (
+          <div className="style-panel">
+            {/* Video Vibe Selection */}
+            <div className="style-section">
+              <h4>🎭 Video Vibe</h4>
+              <div className="vibe-grid">
+                {[
+                  { id: 'default', name: 'Default', emoji: '✨', desc: 'Balanced, works for everything' },
+                  { id: 'energetic', name: 'Energetic', emoji: '⚡', desc: 'Fast cuts, punchy bass' },
+                  { id: 'chill', name: 'Chill', emoji: '😎', desc: 'Relaxed, lo-fi vibes' },
+                  { id: 'dramatic', name: 'Dramatic', emoji: '🎬', desc: 'Cinematic, emotional' },
+                  { id: 'funny', name: 'Funny', emoji: '😂', desc: 'Quirky, playful' },
+                  { id: 'educational', name: 'Educational', emoji: '🧠', desc: 'Clean, professional' },
+                ].map(vibe => (
+                  <div 
+                    key={vibe.id}
+                    className={`vibe-card ${videoVibe === vibe.id ? 'selected' : ''}`}
+                    onClick={() => setVideoVibe(vibe.id)}
+                  >
+                    <span className="vibe-emoji">{vibe.emoji}</span>
+                    <span className="vibe-name">{vibe.name}</span>
+                    <span className="vibe-desc">{vibe.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {/* Caption Animation Selection */}
+            <div className="style-section">
+              <h4>✍️ Caption Animation</h4>
+              <div className="animation-grid">
+                {[
+                  { id: 'karaoke', name: 'Karaoke', preview: 'word-by-word highlight' },
+                  { id: 'pop', name: 'Pop', preview: 'words pop in with scale' },
+                  { id: 'typewriter', name: 'Typewriter', preview: 'letters appear one by one' },
+                  { id: 'bounce', name: 'Bounce', preview: 'bouncy entrance' },
+                  { id: 'fade', name: 'Fade', preview: 'smooth fade in/out' },
+                  { id: 'none', name: 'Static', preview: 'no animation' },
+                ].map(anim => (
+                  <div 
+                    key={anim.id}
+                    className={`animation-card ${captionAnimation === anim.id ? 'selected' : ''}`}
+                    onClick={() => setCaptionAnimation(anim.id)}
+                  >
+                    <div className={`animation-preview anim-${anim.id}`} style={{ color: captionColor }}>
+                      <span style={{ backgroundColor: captionAnimation === anim.id ? animationColor : 'transparent' }}>
+                        Sample
+                      </span>
+                    </div>
+                    <span className="animation-name">{anim.name}</span>
+                    <span className="animation-desc">{anim.preview}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {/* Caption Colors */}
+            <div className="style-section colors-section">
+              <h4>🎨 Caption Colors</h4>
+              <div className="color-pickers">
+                <div className="color-picker-group">
+                  <label>Text Color</label>
+                  <div className="color-input-row">
+                    <input 
+                      type="color" 
+                      value={captionColor}
+                      onChange={(e) => setCaptionColor(e.target.value)}
+                    />
+                    <div className="color-presets">
+                      {['#FFFFFF', '#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FF6600'].map(c => (
+                        <button 
+                          key={c}
+                          className={`color-preset ${captionColor === c ? 'selected' : ''}`}
+                          style={{ backgroundColor: c }}
+                          onClick={() => setCaptionColor(c)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="color-picker-group">
+                  <label>Highlight Color (animation)</label>
+                  <div className="color-input-row">
+                    <input 
+                      type="color" 
+                      value={animationColor}
+                      onChange={(e) => setAnimationColor(e.target.value)}
+                    />
+                    <div className="color-presets">
+                      {['#FFFF00', '#00FF00', '#FF00FF', '#00FFFF', '#FF6600', '#FF0000'].map(c => (
+                        <button 
+                          key={c}
+                          className={`color-preset ${animationColor === c ? 'selected' : ''}`}
+                          style={{ backgroundColor: c }}
+                          onClick={() => setAnimationColor(c)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Live Caption Preview */}
+              <div className="caption-live-preview">
+                <div className="phone-mockup">
+                  <div className="phone-screen">
+                    <div 
+                      className={`preview-caption anim-${captionAnimation}`}
+                      style={{ color: captionColor }}
+                    >
+                      <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>This</span> is how your <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>captions</span> will look
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Title/Header Style Selection */}
+            <div className="style-section">
+              <h4>📌 Hook Title Style</h4>
+              <p className="style-hint">Shown at the top for the first 3-4 seconds</p>
+              <div className="title-grid">
+                {[
+                  { id: 'bold', name: 'Bold', style: { fontWeight: 800, textTransform: 'uppercase' } },
+                  { id: 'outline', name: 'Outline', style: { fontWeight: 700, WebkitTextStroke: '2px', WebkitTextFillColor: 'transparent' } },
+                  { id: 'shadow', name: 'Shadow', style: { fontWeight: 700, textShadow: '4px 4px 0 #000' } },
+                  { id: 'glow', name: 'Glow', style: { fontWeight: 700, textShadow: '0 0 20px currentColor' } },
+                  { id: 'minimal', name: 'Minimal', style: { fontWeight: 500, letterSpacing: '0.1em' } },
+                  { id: 'retro', name: 'Retro', style: { fontWeight: 800, fontStyle: 'italic', transform: 'skewX(-5deg)' } },
+                ].map(title => (
+                  <div 
+                    key={title.id}
+                    className={`title-card ${titleStyle === title.id ? 'selected' : ''}`}
+                    onClick={() => setTitleStyle(title.id)}
+                  >
+                    <div 
+                      className="title-preview"
+                      style={{ ...title.style, color: titleColor, borderColor: titleColor }}
+                    >
+                      HOOK TEXT
+                    </div>
+                    <span className="title-name">{title.name}</span>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="color-picker-group" style={{ marginTop: '1rem' }}>
+                <label>Title Color</label>
+                <div className="color-input-row">
+                  <input 
+                    type="color" 
+                    value={titleColor}
+                    onChange={(e) => setTitleColor(e.target.value)}
+                  />
+                  <div className="color-presets">
+                    {['#FFFF00', '#FF0000', '#00FF00', '#FFFFFF', '#FF6600', '#00FFFF'].map(c => (
+                      <button 
+                        key={c}
+                        className={`color-preset ${titleColor === c ? 'selected' : ''}`}
+                        style={{ backgroundColor: c }}
+                        onClick={() => setTitleColor(c)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {burnCaptions && (
           <p className="memory-warning">
             ⚠️ Captions require loading Whisper AI model (~1GB RAM). If you're on Railway free tier, this may crash. Disable captions to skip transcription.
