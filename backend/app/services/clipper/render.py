@@ -55,18 +55,13 @@ def render_final_clip(
         crop_filter = build_crop_filter(video_info, center_x)
         filters.append(crop_filter)
     
-    # Add scene change zoom effect (every 1.5 seconds) - ALWAYS enabled
+    # Add scene change zoom effect
+    # Note: Dynamic time-based zoom doesn't work in FFmpeg scale filter (no 't' variable in init mode)
+    # So we use a slight static zoom + the color grading creates the "edited" feel
     if enable_effects:
-        # Use simple scale oscillation for zoom effect - works better on Railway
-        # This creates subtle zoom in/out every 1.5 seconds
-        # Using scale filter which is more compatible than zoompan
-        interval = scene_change_interval
-        # Scale between 100% and 106% with smooth sine wave
-        zoom_filter = (
-            f"scale=iw*(1.0+0.06*sin(2*3.14159*t/{interval})):"
-            f"ih*(1.0+0.06*sin(2*3.14159*t/{interval})),"
-            f"crop=1080:1920"
-        )
+        # Static slight zoom (103%) with crop to 1080x1920
+        # This gives a tighter framing that looks more professional
+        zoom_filter = "scale=iw*1.03:ih*1.03,crop=1080:1920"
         filters.append(zoom_filter)
     
     # Add color grading for viral look
