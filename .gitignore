@@ -44,6 +44,9 @@ env/
 # Generated images (keep folder structure)
 backend/generated_images/*.png
 
+# Generated clips (video files are large)
+backend/generated_clips/
+
 # Node
 node_modules/
 npm-debug.log
