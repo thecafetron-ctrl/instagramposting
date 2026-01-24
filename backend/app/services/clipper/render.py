@@ -1,6 +1,7 @@
 """Render module - final video assembly with burned-in captions."""
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -8,6 +9,9 @@ from typing import Optional
 from .crop import check_ffmpeg, get_ffmpeg_install_instructions, get_video_info, build_crop_filter, detect_motion_center, get_ffmpeg_path
 
 logger = logging.getLogger(__name__)
+
+# Use fast encoding preset for cloud deployments (detected by RAILWAY or similar env vars)
+IS_CLOUD = os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RENDER') or os.environ.get('FLY_APP_NAME')
 
 
 def render_final_clip(
@@ -46,6 +50,10 @@ def render_final_clip(
             ass_escaped = str(ass_path).replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
             filters.append(f"ass='{ass_escaped}'")
     
+    # Use faster encoding preset for cloud (Railway etc) to avoid timeouts
+    # ultrafast is ~5x faster than medium but larger file size
+    preset = 'ultrafast' if IS_CLOUD else 'medium'
+    
     cmd = [
         get_ffmpeg_path(), '-y',
         '-ss', str(start_time),
@@ -58,13 +66,15 @@ def render_final_clip(
     
     cmd.extend([
         '-c:v', 'libx264',
-        '-preset', 'medium',
+        '-preset', preset,
         '-crf', '23',
         '-c:a', 'aac',
         '-b:a', '128k',
         '-movflags', '+faststart',
         str(output_path)
     ])
+    
+    logger.info(f"Using encoding preset: {preset}")
     
     logger.info(f"Rendering final clip: {output_path.name}")
     logger.debug(f"Command: {' '.join(cmd)}")
