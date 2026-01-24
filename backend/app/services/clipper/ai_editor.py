@@ -1206,6 +1206,7 @@ class AIVideoEditor:
         add_music: bool = None,
         add_effects: bool = None,
         optimize_boundaries: bool = True,
+        log_callback=None,  # Optional callback to send logs to frontend
     ) -> EditedClip:
         """
         Apply AI editing to create an engaging clip.
@@ -1219,8 +1220,16 @@ class AIVideoEditor:
         from .crop import get_ffmpeg_path, get_video_info
         from .render import render_final_clip, create_thumbnail
         
+        # Helper to send logs
+        def log(msg, level="info"):
+            if log_callback:
+                log_callback(f"      {msg}", level)
+            logger.info(msg)
+        
         add_music = add_music if add_music is not None else self.enable_music
         add_effects = add_effects if add_effects is not None else self.enable_effects
+        
+        log("🎯 Optimizing clip boundaries...")
         
         # AI-optimize clip boundaries for better hooks/endings
         if optimize_boundaries and self.use_ai:
@@ -1230,9 +1239,11 @@ class AIVideoEditor:
                 min_duration=15.0, max_duration=60.0
             )
             if ai_hook:
-                logger.info(f"AI optimized clip to start with hook: '{ai_hook[:50]}...'")
+                log(f"🪝 Found hook: '{ai_hook[:40]}...'", "success")
             start_time = opt_start
             end_time = opt_end
+        
+        log("🔍 Analyzing clip for emotional moments...")
         
         # Analyze the clip
         moments, hook_text, ending_text = self.analyze_clip(words, start_time, end_time)
@@ -1254,6 +1265,7 @@ class AIVideoEditor:
         ]
         
         # Generate AI-powered captions with custom styles
+        log(f"📝 Generating box-per-word captions ({len(clip_words)} words)...")
         ass_path = None
         if burn_captions and clip_words:
             ass_path = output_path.with_suffix('.ass')
@@ -1270,16 +1282,19 @@ class AIVideoEditor:
                 caption_animation=self.style_config.get("caption_animation", "karaoke"),
                 caption_size=self.style_config.get("caption_size", 80),
             )
+            log("✓ Captions generated with highlight colors", "success")
         
         # Build effects filter
         effects_filter = ""
         effects_applied = []
         if add_effects:
+            log("🎨 Applying color grading + visual effects...")
             clip_duration = end_time - start_time
             effects_filter = build_effects_filter(moments, clip_duration)
             effects_applied = ["zoom", "vignette", "color_grade", "sharpen"]
         
         # Render the clip with effects and captions
+        log("🎬 Rendering video with FFmpeg...")
         temp_output = output_path.with_stem(output_path.stem + "_temp")
         
         render_final_clip(
@@ -1291,6 +1306,7 @@ class AIVideoEditor:
             crop_vertical=True,
             auto_center=True,
         )
+        log("✓ Video rendered", "success")
         
         # Add music if enabled
         music_track = None

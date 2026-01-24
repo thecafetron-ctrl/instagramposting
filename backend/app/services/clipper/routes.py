@@ -1865,6 +1865,11 @@ def run_full_railway_processing(
             # Use AI editor for enhanced rendering
             try:
                 add_job_log(job_id, f"   🎨 AI Editor: captions + effects + hook optimization")
+                
+                # Create log callback for AI editor to send progress
+                def ai_log(msg, level="info"):
+                    add_job_log(job_id, msg, level)
+                
                 edited_result = ai_editor.edit_clip(
                     source_video=input_path,
                     output_path=clip_path,
@@ -1875,6 +1880,7 @@ def run_full_railway_processing(
                     add_music=True,  # ENABLED: Add background music
                     add_effects=True,  # ENABLED: Add zoom/color effects
                     optimize_boundaries=True,  # AI-optimize hooks and endings
+                    log_callback=ai_log,  # Send AI editor progress to frontend
                 )
                 thumb_path = edited_result.thumbnail_path
                 hook_text = edited_result.hook_text
