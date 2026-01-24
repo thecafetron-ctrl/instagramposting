@@ -1532,60 +1532,98 @@ def run_full_railway_processing(
                     except:
                         pass
             
+            # Use a simpler output template that yt-dlp handles better
+            output_template = str(job_dir / "input.%(ext)s")
+            
             ydl_opts = {
-                'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[ext=mp4]/best',
-                'outtmpl': str(input_path.with_suffix('')),
-                'merge_output_format': 'mp4',
+                # Simpler format selection - just get best available
+                'format': 'best[height<=720]/best',
+                'outtmpl': output_template,
                 'progress_hooks': [progress_hook],
-                'quiet': False,  # Show output for debugging
+                'quiet': False,
                 'no_warnings': False,
-                'verbose': False,
-                # Fix for 403 Forbidden errors
+                # Postprocessor to convert to mp4 if needed
+                'postprocessors': [{
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                }],
+                # Fix for 403 Forbidden errors - use iOS client which has fewer restrictions
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-us,en;q=0.5',
+                    'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
                 },
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
+                        'player_client': ['ios', 'android', 'web'],
+                        'player_skip': ['webpage', 'configs'],
                     }
                 },
+                # Additional options to help with restricted videos
+                'socket_timeout': 60,
+                'retries': 5,
+                'fragment_retries': 5,
             }
             
             try:
-                add_job_log(job_id, f"Starting yt-dlp download to: {input_path}")
+                add_job_log(job_id, f"Starting yt-dlp download (using iOS client)...")
+                add_job_log(job_id, f"Output template: {output_template}")
+                
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # First extract info to check if video is available
+                    info = ydl.extract_info(youtube_url, download=False)
+                    add_job_log(job_id, f"Video found: {info.get('title', 'Unknown')} ({info.get('duration', 0)}s)")
+                    
+                    # Now download
                     ydl.download([youtube_url])
+                    
             except Exception as dl_err:
-                add_job_log(job_id, f"✗ Download error: {dl_err}", "error")
+                error_msg = str(dl_err)
+                add_job_log(job_id, f"✗ Download error: {error_msg}", "error")
                 logger.error(f"yt-dlp download failed: {dl_err}")
-                update_job_progress(job_id, "failed", 0, "Download failed", str(dl_err))
+                
+                # Try to give helpful error messages
+                if "403" in error_msg:
+                    add_job_log(job_id, "This video may have age/region restrictions. Try a different video.", "error")
+                elif "private" in error_msg.lower():
+                    add_job_log(job_id, "This video is private and cannot be downloaded.", "error")
+                
+                update_job_progress(job_id, "failed", 0, "Download failed", error_msg[:200])
                 return
             
-            # Find downloaded file - check multiple possible extensions
+            # Find downloaded file - check all files in directory
             add_job_log(job_id, f"Looking for downloaded file in {job_dir}")
             found_file = None
-            for ext in ['.mp4', '.mkv', '.webm', '.m4a', '']:
-                candidate = input_path.with_suffix(ext) if ext else input_path
-                add_job_log(job_id, f"  Checking: {candidate} - exists: {candidate.exists()}")
-                if candidate.exists():
-                    found_file = candidate
-                    break
             
-            # Also check for file without extension but with original name
-            if not found_file:
-                for f in job_dir.iterdir():
-                    add_job_log(job_id, f"  Found in dir: {f.name}")
-                    if f.name.startswith("input") and f.suffix in ['.mp4', '.mkv', '.webm', '.m4a']:
+            # List all files in directory
+            all_files = list(job_dir.iterdir())
+            add_job_log(job_id, f"Files in directory: {[f.name for f in all_files]}")
+            
+            # Check for input.mp4 first (direct match)
+            if input_path.exists():
+                found_file = input_path
+                add_job_log(job_id, f"Found: {input_path}")
+            else:
+                # Check for any input.* file
+                for f in all_files:
+                    if f.name.startswith("input") and f.suffix in ['.mp4', '.mkv', '.webm', '.m4a', '.mov']:
                         found_file = f
+                        add_job_log(job_id, f"Found video: {f.name}")
                         break
             
             if found_file and found_file != input_path:
-                add_job_log(job_id, f"Renaming {found_file} to {input_path}")
+                add_job_log(job_id, f"Renaming {found_file.name} to input.mp4")
                 found_file.rename(input_path)
-            elif not found_file and not input_path.exists():
-                add_job_log(job_id, f"✗ Download failed - no video file found in {job_dir}", "error")
+            elif not found_file:
+                # Last resort - check for any video file
+                for f in all_files:
+                    if f.suffix in ['.mp4', '.mkv', '.webm', '.m4a', '.mov'] and f.stat().st_size > 1000:
+                        add_job_log(job_id, f"Found video file: {f.name}, renaming to input.mp4")
+                        f.rename(input_path)
+                        found_file = input_path
+                        break
+            
+            if not input_path.exists():
+                add_job_log(job_id, f"✗ Download completed but no video file created!", "error")
+                add_job_log(job_id, f"Directory contents: {[f.name for f in job_dir.iterdir()]}", "error")
                 update_job_progress(job_id, "failed", 0, "Download failed", "Video file not found after download")
                 return
             
@@ -2108,23 +2146,29 @@ def run_smart_analysis(
                     except:
                         pass
             
+            output_template = str(job_dir / "input.%(ext)s")
+            
             ydl_opts = {
-                'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[ext=mp4]/best',
-                'outtmpl': str(input_path.with_suffix('')),
-                'merge_output_format': 'mp4',
+                'format': 'best[height<=720]/best',
+                'outtmpl': output_template,
                 'progress_hooks': [progress_hook],
                 'quiet': False,
                 'no_warnings': False,
-                # Fix for 403 Forbidden errors
+                'postprocessors': [{
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                }],
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
                 },
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
+                        'player_client': ['ios', 'android', 'web'],
+                        'player_skip': ['webpage', 'configs'],
                     }
                 },
+                'socket_timeout': 60,
+                'retries': 5,
             }
             
             try:
@@ -2137,9 +2181,22 @@ def run_smart_analysis(
             
             # Find downloaded file
             found_file = None
-            for ext in ['.mp4', '.mkv', '.webm', '.m4a', '']:
-                candidate = input_path.with_suffix(ext) if ext else input_path
-                if candidate.exists():
+            if input_path.exists():
+                found_file = input_path
+            else:
+                for f in job_dir.iterdir():
+                    if f.name.startswith("input") and f.suffix in ['.mp4', '.mkv', '.webm', '.mov']:
+                        found_file = f
+                        break
+            
+            if found_file and found_file != input_path:
+                found_file.rename(input_path)
+            
+            # Find downloaded file fallback
+            if not input_path.exists():
+                for ext in ['.mp4', '.mkv', '.webm', '.m4a', '']:
+                    candidate = input_path.with_suffix(ext) if ext else input_path
+                    if candidate.exists():
                     found_file = candidate
                     break
             
