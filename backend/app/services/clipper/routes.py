@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 from typing import Optional, List
@@ -22,9 +23,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/clipper", tags=["Video Clipper"])
 
-# Store for job progress
+# Store for job progress and control
 _job_progress = {}
 _job_results = {}
+_job_cancel_flags = {}  # Track which jobs should be cancelled
+_job_threads = {}  # Track running threads
 
 # Output directory
 CLIPS_OUTPUT_DIR = Path("generated_clips")
@@ -50,6 +53,7 @@ class ClipperJobResponse(BaseModel):
     status: str
     progress: float
     stage: str
+    detail: Optional[str] = None
     error: Optional[str] = None
     result: Optional[dict] = None
 
@@ -76,6 +80,24 @@ class ClipperResultResponse(BaseModel):
     clips: List[ClipInfo]
     transcript_url: Optional[str]
     error: Optional[str] = None
+
+
+def update_job_progress(job_id: str, status: str, progress: float, stage: str, detail: str = None, error: str = None):
+    """Update job progress with logging."""
+    _job_progress[job_id] = {
+        "status": status,
+        "progress": progress,
+        "stage": stage,
+        "detail": detail,
+        "error": error,
+        "updated_at": datetime.now().isoformat()
+    }
+    logger.info(f"[Job {job_id}] {progress*100:.0f}% - {stage}" + (f" ({detail})" if detail else ""))
+
+
+def is_job_cancelled(job_id: str) -> bool:
+    """Check if a job has been cancelled."""
+    return _job_cancel_flags.get(job_id, False)
 
 
 @router.get("/status")
@@ -194,14 +216,16 @@ async def upload_video(
     video_path = upload_dir / f"input{ext}"
     
     try:
+        update_job_progress(job_id, "processing", 0.01, "Receiving upload", f"Saving {file.filename}")
         with open(video_path, "wb") as f:
             content = await file.read()
             f.write(content)
+        update_job_progress(job_id, "processing", 0.05, "Upload complete", f"Saved {len(content)/1024/1024:.1f}MB")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
-    # Initialize job progress
-    _job_progress[job_id] = {"status": "queued", "progress": 0.0, "stage": "Uploaded"}
+    # Initialize cancel flag
+    _job_cancel_flags[job_id] = False
     
     # Build config
     config = PipelineConfig(
@@ -216,16 +240,14 @@ async def upload_video(
         auto_center=auto_center,
     )
     
-    # Start processing in background
-    if background_tasks:
-        background_tasks.add_task(
-            run_clipper_job, job_id, str(video_path), str(upload_dir), config
-        )
-    else:
-        # Fallback: run in thread
-        asyncio.create_task(
-            asyncio.to_thread(run_clipper_job_sync, job_id, str(video_path), str(upload_dir), config)
-        )
+    # Start processing in a dedicated thread
+    thread = threading.Thread(
+        target=run_clipper_job_sync,
+        args=(job_id, str(video_path), str(upload_dir), config),
+        daemon=True
+    )
+    _job_threads[job_id] = thread
+    thread.start()
     
     return {
         "job_id": job_id,
@@ -249,10 +271,39 @@ class YouTubeRequest(BaseModel):
 
 
 def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
-    """Download a YouTube video using yt-dlp."""
+    """Download a YouTube video using yt-dlp with progress tracking."""
     import yt_dlp
     
     output_path = output_dir / "input.mp4"
+    
+    def progress_hook(d):
+        """Track download progress."""
+        if is_job_cancelled(job_id):
+            raise Exception("Job cancelled by user")
+        
+        if d['status'] == 'downloading':
+            try:
+                downloaded = d.get('downloaded_bytes', 0)
+                total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                speed = d.get('speed', 0)
+                eta = d.get('eta', 0)
+                
+                if total > 0:
+                    pct = downloaded / total
+                    progress = 0.02 + (pct * 0.08)  # 2% to 10%
+                    
+                    speed_str = f"{speed/1024/1024:.1f}MB/s" if speed else "calculating..."
+                    eta_str = f"{eta}s" if eta else "..."
+                    detail = f"Downloaded {downloaded/1024/1024:.1f}MB / {total/1024/1024:.1f}MB ({speed_str}, ETA: {eta_str})"
+                else:
+                    progress = 0.05
+                    detail = f"Downloaded {downloaded/1024/1024:.1f}MB"
+                
+                update_job_progress(job_id, "processing", progress, "Downloading from YouTube", detail)
+            except:
+                pass
+        elif d['status'] == 'finished':
+            update_job_progress(job_id, "processing", 0.10, "Download complete", "Merging audio/video...")
     
     ydl_opts = {
         'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
@@ -261,29 +312,48 @@ def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
+        'progress_hooks': [progress_hook],
+        'socket_timeout': 30,  # Timeout for network operations
+        'retries': 3,
     }
     
-    # Update progress
-    _job_progress[job_id] = {
-        "status": "processing",
-        "progress": 0.02,
-        "stage": "Downloading video from YouTube..."
-    }
+    update_job_progress(job_id, "processing", 0.02, "Connecting to YouTube", "Fetching video info...")
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # First extract info to get video details
+            info = ydl.extract_info(url, download=False)
+            title = info.get('title', 'Unknown')
+            duration = info.get('duration', 0)
+            
+            update_job_progress(
+                job_id, "processing", 0.03, 
+                "Starting download", 
+                f'"{title[:50]}..." ({duration//60}m {duration%60}s)'
+            )
+            
+            # Check cancellation before download
+            if is_job_cancelled(job_id):
+                raise Exception("Job cancelled by user")
+            
+            # Now download
+            ydl.download([url])
+    except Exception as e:
+        if "cancelled" in str(e).lower():
+            raise
+        logger.error(f"yt-dlp download error: {e}")
+        raise Exception(f"YouTube download failed: {str(e)}")
     
-    # Find the downloaded file (might have different extension)
+    # Find the downloaded file
     for ext in ['.mp4', '.mkv', '.webm']:
         candidate = output_dir / f"input{ext}"
         if candidate.exists():
             return str(candidate)
     
-    # Check if merged file exists
     if output_path.exists():
         return str(output_path)
     
-    raise FileNotFoundError("Downloaded video file not found")
+    raise FileNotFoundError("Downloaded video file not found. YouTube may have blocked the download.")
 
 
 @router.post("/youtube")
@@ -339,8 +409,9 @@ async def process_youtube_video(
     output_dir = CLIPS_OUTPUT_DIR / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Initialize job progress
-    _job_progress[job_id] = {"status": "queued", "progress": 0.0, "stage": "Starting YouTube download..."}
+    # Initialize job
+    _job_cancel_flags[job_id] = False
+    update_job_progress(job_id, "processing", 0.01, "Initializing", "Starting YouTube download...")
     
     # Build config
     config = PipelineConfig(
@@ -355,15 +426,14 @@ async def process_youtube_video(
         auto_center=request.auto_center,
     )
     
-    # Start processing in background
-    if background_tasks:
-        background_tasks.add_task(
-            run_youtube_job, job_id, url, str(output_dir), config
-        )
-    else:
-        asyncio.create_task(
-            asyncio.to_thread(run_youtube_job_sync, job_id, url, str(output_dir), config)
-        )
+    # Start processing in a dedicated thread
+    thread = threading.Thread(
+        target=run_youtube_job_sync,
+        args=(job_id, url, str(output_dir), config),
+        daemon=True
+    )
+    _job_threads[job_id] = thread
+    thread.start()
     
     return {
         "job_id": job_id,
@@ -372,50 +442,37 @@ async def process_youtube_video(
     }
 
 
-async def run_youtube_job(
-    job_id: str,
-    url: str,
-    output_dir: str,
-    config: PipelineConfig
-):
-    """Run the YouTube download and clipper pipeline as a background job."""
-    await asyncio.to_thread(run_youtube_job_sync, job_id, url, output_dir, config)
-
-
 def run_youtube_job_sync(
     job_id: str,
     url: str,
     output_dir: str,
     config: PipelineConfig
 ):
-    """Synchronous YouTube job runner."""
+    """Synchronous YouTube job runner with cancellation support."""
     try:
-        # Download video
-        _job_progress[job_id] = {
-            "status": "processing",
-            "progress": 0.01,
-            "stage": "Downloading from YouTube..."
-        }
+        if is_job_cancelled(job_id):
+            update_job_progress(job_id, "cancelled", 0, "Cancelled", "Job was cancelled before starting")
+            return
         
+        # Download video
         video_path = download_youtube_video(url, Path(output_dir), job_id)
         
-        _job_progress[job_id] = {
-            "status": "processing",
-            "progress": 0.10,
-            "stage": "Download complete. Starting transcription..."
-        }
+        if is_job_cancelled(job_id):
+            update_job_progress(job_id, "cancelled", 0, "Cancelled", "Job was cancelled after download")
+            return
+        
+        update_job_progress(job_id, "processing", 0.12, "Download complete", "Starting video processing...")
         
         # Now run the regular clipper job
         run_clipper_job_sync(job_id, video_path, output_dir, config)
         
     except Exception as e:
-        logger.exception(f"YouTube job {job_id} failed")
-        _job_progress[job_id] = {
-            "status": "failed",
-            "progress": 0.0,
-            "stage": "Error",
-            "error": str(e)
-        }
+        error_msg = str(e)
+        if "cancelled" in error_msg.lower():
+            update_job_progress(job_id, "cancelled", 0, "Cancelled", "Job was cancelled by user")
+        else:
+            logger.exception(f"YouTube job {job_id} failed")
+            update_job_progress(job_id, "failed", 0, "Error", error=error_msg)
 
 
 @router.post("/process-local")
@@ -429,21 +486,17 @@ async def process_local_video(
     
     Returns a job_id to track progress.
     """
-    # Validate path exists
     if not Path(video_path).exists():
         raise HTTPException(status_code=404, detail=f"Video not found: {video_path}")
     
-    # Create job ID
     job_id = str(uuid.uuid4())[:8]
     
-    # Create output directory
     output_dir = CLIPS_OUTPUT_DIR / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Initialize job progress
-    _job_progress[job_id] = {"status": "queued", "progress": 0.0, "stage": "Starting"}
+    _job_cancel_flags[job_id] = False
+    update_job_progress(job_id, "processing", 0.01, "Initializing", "Starting video processing...")
     
-    # Build config
     pipeline_config = PipelineConfig(
         num_clips=config.num_clips,
         min_duration=config.min_duration,
@@ -456,11 +509,13 @@ async def process_local_video(
         auto_center=config.auto_center,
     )
     
-    # Start processing
-    if background_tasks:
-        background_tasks.add_task(
-            run_clipper_job, job_id, video_path, str(output_dir), pipeline_config
-        )
+    thread = threading.Thread(
+        target=run_clipper_job_sync,
+        args=(job_id, video_path, str(output_dir), pipeline_config),
+        daemon=True
+    )
+    _job_threads[job_id] = thread
+    thread.start()
     
     return {
         "job_id": job_id,
@@ -469,64 +524,68 @@ async def process_local_video(
     }
 
 
-async def run_clipper_job(
-    job_id: str,
-    video_path: str,
-    output_dir: str,
-    config: PipelineConfig
-):
-    """Run the clipper pipeline as a background job."""
-    await asyncio.to_thread(run_clipper_job_sync, job_id, video_path, output_dir, config)
-
-
 def run_clipper_job_sync(
     job_id: str,
     video_path: str,
     output_dir: str,
     config: PipelineConfig
 ):
-    """Synchronous clipper job runner."""
+    """Synchronous clipper job runner with detailed progress and cancellation."""
+    
     def progress_callback(stage: str, progress: float):
-        _job_progress[job_id] = {
-            "status": "processing",
-            "progress": progress,
-            "stage": stage
+        """Progress callback with cancellation check."""
+        if is_job_cancelled(job_id):
+            raise Exception("Job cancelled by user")
+        
+        # Map pipeline stages to more descriptive messages
+        stage_details = {
+            "Transcribing video": "Loading Whisper model and transcribing audio...",
+            "Transcription complete": "Speech-to-text finished",
+            "Segmenting transcript": "Finding natural break points...",
+            "Segmentation complete": "Identified candidate clips",
+            "Scoring clips": "Analyzing for highlight moments...",
+            "Scoring complete": "Ranked clips by engagement potential",
+            "Rendering clips": "Processing video with FFmpeg...",
+            "Pipeline complete": "All clips generated successfully!",
         }
+        
+        # Adjust progress to account for download phase (which ends at ~10%)
+        adjusted_progress = 0.12 + (progress * 0.88)
+        detail = stage_details.get(stage, stage)
+        
+        update_job_progress(job_id, "processing", adjusted_progress, stage, detail)
     
     try:
-        _job_progress[job_id] = {
-            "status": "processing",
-            "progress": 0.0,
-            "stage": "Initializing"
-        }
+        if is_job_cancelled(job_id):
+            update_job_progress(job_id, "cancelled", 0, "Cancelled", "Job was cancelled")
+            return
+        
+        update_job_progress(job_id, "processing", 0.12, "Initializing pipeline", "Loading video file...")
         
         pipeline = ClipperPipeline(config, progress_callback=progress_callback)
         result = pipeline.run(video_path, output_dir)
         
+        if is_job_cancelled(job_id):
+            update_job_progress(job_id, "cancelled", 0, "Cancelled", "Job was cancelled")
+            return
+        
         if result.success:
-            _job_progress[job_id] = {
-                "status": "completed",
-                "progress": 1.0,
-                "stage": "Complete"
-            }
+            update_job_progress(
+                job_id, "completed", 1.0, "Complete",
+                f"Generated {len(result.clips)} clips in {result.processing_time:.1f}s"
+            )
             _job_results[job_id] = result
         else:
-            _job_progress[job_id] = {
-                "status": "failed",
-                "progress": 0.0,
-                "stage": "Failed",
-                "error": result.error
-            }
+            update_job_progress(job_id, "failed", 0, "Failed", error=result.error)
             _job_results[job_id] = result
             
     except Exception as e:
-        logger.exception(f"Job {job_id} failed")
-        _job_progress[job_id] = {
-            "status": "failed",
-            "progress": 0.0,
-            "stage": "Error",
-            "error": str(e)
-        }
+        error_msg = str(e)
+        if "cancelled" in error_msg.lower():
+            update_job_progress(job_id, "cancelled", 0, "Cancelled", "Job was cancelled by user")
+        else:
+            logger.exception(f"Job {job_id} failed")
+            update_job_progress(job_id, "failed", 0, "Error", error=error_msg)
 
 
 @router.get("/job/{job_id}")
@@ -551,9 +610,38 @@ async def get_job_status(job_id: str) -> ClipperJobResponse:
         status=progress["status"],
         progress=progress["progress"],
         stage=progress["stage"],
+        detail=progress.get("detail"),
         error=progress.get("error"),
         result=result_data
     )
+
+
+@router.post("/job/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """Cancel a running job."""
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    progress = _job_progress[job_id]
+    
+    if progress["status"] not in ["processing", "queued"]:
+        return {
+            "job_id": job_id,
+            "cancelled": False,
+            "message": f"Job cannot be cancelled (status: {progress['status']})"
+        }
+    
+    # Set cancel flag
+    _job_cancel_flags[job_id] = True
+    
+    # Update progress immediately
+    update_job_progress(job_id, "cancelling", progress["progress"], "Cancelling", "Waiting for current operation to complete...")
+    
+    return {
+        "job_id": job_id,
+        "cancelled": True,
+        "message": "Cancellation requested. Job will stop after current operation completes."
+    }
 
 
 @router.get("/job/{job_id}/result")
@@ -607,16 +695,13 @@ async def get_job_result(job_id: str) -> ClipperResultResponse:
 @router.get("/clips/{job_id}/{filename}")
 async def get_clip_file(job_id: str, filename: str):
     """Serve a generated clip or thumbnail."""
-    # Check in clips subdirectory first
     file_path = CLIPS_OUTPUT_DIR / job_id / "clips" / filename
     if not file_path.exists():
-        # Check in main job directory
         file_path = CLIPS_OUTPUT_DIR / job_id / filename
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Determine media type
     ext = file_path.suffix.lower()
     media_types = {
         '.mp4': 'video/mp4',
@@ -636,16 +721,20 @@ async def get_clip_file(job_id: str, filename: str):
 @router.delete("/job/{job_id}")
 async def delete_job(job_id: str):
     """Delete a job and its output files."""
+    # First try to cancel if running
+    if job_id in _job_cancel_flags:
+        _job_cancel_flags[job_id] = True
+    
     job_dir = CLIPS_OUTPUT_DIR / job_id
     
     if job_dir.exists():
         shutil.rmtree(job_dir)
     
-    if job_id in _job_progress:
-        del _job_progress[job_id]
-    
-    if job_id in _job_results:
-        del _job_results[job_id]
+    # Clean up tracking dicts
+    _job_progress.pop(job_id, None)
+    _job_results.pop(job_id, None)
+    _job_cancel_flags.pop(job_id, None)
+    _job_threads.pop(job_id, None)
     
     return {"status": "deleted", "job_id": job_id}
 
@@ -661,6 +750,8 @@ async def list_jobs():
             "status": progress["status"],
             "progress": progress["progress"],
             "stage": progress["stage"],
+            "detail": progress.get("detail"),
+            "updated_at": progress.get("updated_at"),
         }
         
         if progress.get("error"):
@@ -671,5 +762,8 @@ async def list_jobs():
             job_info["clips_count"] = len(result.clips)
         
         jobs.append(job_info)
+    
+    # Sort by most recent first
+    jobs.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     
     return {"jobs": jobs}

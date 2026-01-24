@@ -2411,24 +2411,84 @@
   border-color: rgba(0, 200, 255, 0.2);
 }
 
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.progress-header h3 {
+  margin: 0;
+}
+
 .progress-bar-container {
-  height: 8px;
+  height: 10px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  border-radius: 5px;
   overflow: hidden;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .progress-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, #00c8ff, #7b2cbf);
-  border-radius: 4px;
+  border-radius: 5px;
   transition: width 0.3s ease;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.progress-info {
+  text-align: center;
+  margin-bottom: 1rem;
 }
 
 .progress-text {
-  text-align: center;
+  color: white;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.progress-text strong {
+  color: #00c8ff;
+  font-size: 1.1rem;
+}
+
+.progress-detail {
   color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.progress-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-top: 1rem;
+}
+
+.progress-hint code {
+  background: rgba(0, 200, 255, 0.15);
+  color: #00c8ff;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.warning-card {
+  background: rgba(234, 179, 8, 0.1);
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
+.warning-card h3 {
+  color: #eab308;
 }
 
 .error-card {
@@ -2438,6 +2498,27 @@
 
 .error-card h3 {
   color: #ef4444;
+}
+
+.error-message {
+  color: #fca5a5;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.error-detail {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.3);
 }
 
 .results-card {

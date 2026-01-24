@@ -1443,6 +1443,7 @@ function VideoClipperPage() {
           status: data.status,
           progress: data.progress,
           stage: data.stage,
+          detail: data.detail,
           error: data.error,
         })
         
@@ -1450,16 +1451,38 @@ function VideoClipperPage() {
           clearInterval(interval)
           setPollInterval(null)
           fetchJobResult(jobId)
-        } else if (data.status === 'failed') {
+        } else if (data.status === 'failed' || data.status === 'cancelled') {
           clearInterval(interval)
           setPollInterval(null)
         }
       } catch (err) {
         console.error('Polling failed:', err)
       }
-    }, 2000)
+    }, 1000) // Poll every 1 second for more responsive updates
     
     setPollInterval(interval)
+  }
+
+  const cancelJob = async () => {
+    if (!currentJob?.id) return
+    
+    try {
+      const res = await fetch(`${API_BASE}/clipper/job/${currentJob.id}/cancel`, {
+        method: 'POST',
+      })
+      const data = await res.json()
+      
+      if (data.cancelled) {
+        setCurrentJob(prev => ({
+          ...prev,
+          status: 'cancelling',
+          stage: 'Cancelling...',
+          detail: 'Waiting for current operation to complete'
+        }))
+      }
+    } catch (err) {
+      console.error('Failed to cancel job:', err)
+    }
   }
 
   const fetchJobResult = async (jobId) => {
@@ -1672,18 +1695,51 @@ function VideoClipperPage() {
       </div>
 
       {/* Progress */}
-      {currentJob && currentJob.status === 'processing' && (
+      {currentJob && ['processing', 'cancelling'].includes(currentJob.status) && (
         <div className="clipper-card progress-card">
-          <h3>🔄 Processing</h3>
+          <div className="progress-header">
+            <h3>{currentJob.status === 'cancelling' ? '⏳ Cancelling...' : '🔄 Processing'}</h3>
+            {currentJob.status === 'processing' && (
+              <button 
+                className="btn btn-danger btn-sm"
+                onClick={cancelJob}
+              >
+                ✕ Cancel
+              </button>
+            )}
+          </div>
           <div className="progress-bar-container">
             <div 
               className="progress-bar-fill"
               style={{ width: `${currentJob.progress * 100}%` }}
             />
           </div>
-          <p className="progress-text">
-            {Math.round(currentJob.progress * 100)}% - {currentJob.stage}
+          <div className="progress-info">
+            <p className="progress-text">
+              <strong>{Math.round(currentJob.progress * 100)}%</strong> — {currentJob.stage}
+            </p>
+            {currentJob.detail && (
+              <p className="progress-detail">{currentJob.detail}</p>
+            )}
+          </div>
+          <p className="progress-hint">
+            💡 You can close this page - processing will continue in the background. 
+            Check back later using the job ID: <code>{currentJob.id}</code>
           </p>
+        </div>
+      )}
+
+      {/* Cancelled */}
+      {currentJob && currentJob.status === 'cancelled' && (
+        <div className="clipper-card warning-card">
+          <h3>⏹️ Job Cancelled</h3>
+          <p>{currentJob.detail || 'The job was cancelled by user request.'}</p>
+          <button 
+            className="btn btn-primary btn-sm"
+            onClick={() => setCurrentJob(null)}
+          >
+            Start New Job
+          </button>
         </div>
       )}
 
@@ -1691,7 +1747,17 @@ function VideoClipperPage() {
       {currentJob && currentJob.status === 'failed' && (
         <div className="clipper-card error-card">
           <h3>❌ Processing Failed</h3>
-          <p>{currentJob.error || 'Unknown error occurred'}</p>
+          <p className="error-message">{currentJob.error || 'Unknown error occurred'}</p>
+          {currentJob.detail && (
+            <p className="error-detail">Stage: {currentJob.stage} - {currentJob.detail}</p>
+          )}
+          <button 
+            className="btn btn-primary btn-sm"
+            onClick={() => setCurrentJob(null)}
+            style={{marginTop: '1rem'}}
+          >
+            Try Again
+          </button>
         </div>
       )}
 
