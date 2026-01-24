@@ -2197,8 +2197,8 @@ def run_smart_analysis(
                 for ext in ['.mp4', '.mkv', '.webm', '.m4a', '']:
                     candidate = input_path.with_suffix(ext) if ext else input_path
                     if candidate.exists():
-                    found_file = candidate
-                    break
+                        found_file = candidate
+                        break
             
             # Also check directory for any video files
             if not found_file:
