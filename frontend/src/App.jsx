@@ -1290,16 +1290,36 @@ function VideoClipperPage() {
   const [inputMode, setInputMode] = useState('upload') // 'upload' or 'youtube'
   const [youtubeUrl, setYoutubeUrl] = useState('')
   
-  // Settings
-  const [numClips, setNumClips] = useState(10)
-  const [minDuration, setMinDuration] = useState(20)
-  const [maxDuration, setMaxDuration] = useState(60)
-  const [pauseThreshold, setPauseThreshold] = useState(0.7)
-  const [captionStyle, setCaptionStyle] = useState('default')
-  const [whisperModel, setWhisperModel] = useState('base')
-  const [burnCaptions, setBurnCaptions] = useState(true)
-  const [cropVertical, setCropVertical] = useState(true)
-  const [autoCenter, setAutoCenter] = useState(true)
+  // Load saved settings from localStorage
+  const loadSavedSettings = () => {
+    try {
+      const saved = localStorage.getItem('clipper_settings')
+      if (saved) return JSON.parse(saved)
+    } catch (e) {}
+    return null
+  }
+  
+  const savedSettings = loadSavedSettings()
+  
+  // Settings (with saved defaults)
+  const [numClips, setNumClips] = useState(savedSettings?.numClips ?? 10)
+  const [minDuration, setMinDuration] = useState(savedSettings?.minDuration ?? 20)
+  const [maxDuration, setMaxDuration] = useState(savedSettings?.maxDuration ?? 60)
+  const [pauseThreshold, setPauseThreshold] = useState(savedSettings?.pauseThreshold ?? 0.7)
+  const [captionStyle, setCaptionStyle] = useState(savedSettings?.captionStyle ?? 'default')
+  const [whisperModel, setWhisperModel] = useState(savedSettings?.whisperModel ?? 'base')
+  const [burnCaptions, setBurnCaptions] = useState(savedSettings?.burnCaptions ?? true)
+  const [cropVertical, setCropVertical] = useState(savedSettings?.cropVertical ?? true)
+  const [autoCenter, setAutoCenter] = useState(savedSettings?.autoCenter ?? true)
+
+  // Save settings to localStorage whenever they change
+  useEffect(() => {
+    const settings = {
+      numClips, minDuration, maxDuration, pauseThreshold,
+      captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter
+    }
+    localStorage.setItem('clipper_settings', JSON.stringify(settings))
+  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter])
 
   useEffect(() => {
     checkClipperStatus()
@@ -1452,18 +1472,20 @@ function VideoClipperPage() {
     }
   }
 
-  const isReady = clipperStatus?.status === 'ready'
+  // Allow usage even if status check fails (server might just be starting)
+  const isReady = clipperStatus === null || clipperStatus?.status === 'ready'
+  const hasWarnings = clipperStatus && clipperStatus.status !== 'ready' && clipperStatus.dependencies?.some(d => d.status !== 'installed')
 
   return (
     <section className="clipper-section animate-fade-in">
       <h2 className="section-title">🎬 Video Clipper</h2>
       <p className="section-subtitle">Transform long videos into viral short clips with AI captions</p>
 
-      {/* Status Check */}
-      {clipperStatus && clipperStatus.status !== 'ready' && (
+      {/* Status Check - Only show if there are actual missing dependencies */}
+      {hasWarnings && (
         <div className="clipper-warning">
           <h3>⚠️ Missing Dependencies</h3>
-          <p>Some required tools are not installed:</p>
+          <p>Some required tools may not be installed (you can still try):</p>
           <ul>
             {clipperStatus.dependencies?.filter(d => d.status !== 'installed').map((dep, i) => (
               <li key={i}>
@@ -1472,6 +1494,9 @@ function VideoClipperPage() {
               </li>
             ))}
           </ul>
+          <button className="btn btn-secondary btn-sm" onClick={checkClipperStatus} style={{marginTop: '0.5rem'}}>
+            🔄 Re-check Status
+          </button>
         </div>
       )}
 
@@ -1602,7 +1627,7 @@ function VideoClipperPage() {
                 type="file" 
                 accept="video/*"
                 onChange={handleUpload}
-                disabled={uploading || !isReady}
+                disabled={uploading}
               />
               <div className="upload-content">
                 <span className="upload-icon">🎥</span>
@@ -1624,12 +1649,17 @@ function VideoClipperPage() {
                 placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
                 value={youtubeUrl}
                 onChange={(e) => setYoutubeUrl(e.target.value)}
-                disabled={uploading || !isReady}
+                disabled={uploading}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && youtubeUrl.trim() && !uploading) {
+                    handleYoutubeSubmit()
+                  }
+                }}
               />
               <button 
                 className="btn btn-primary"
                 onClick={handleYoutubeSubmit}
-                disabled={uploading || !isReady || !youtubeUrl.trim()}
+                disabled={uploading || !youtubeUrl.trim()}
               >
                 {uploading ? 'Processing...' : '🚀 Process'}
               </button>
