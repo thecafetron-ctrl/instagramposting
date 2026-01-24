@@ -1286,6 +1286,10 @@ function VideoClipperPage() {
   const [jobResult, setJobResult] = useState(null)
   const [pollInterval, setPollInterval] = useState(null)
   
+  // Input mode
+  const [inputMode, setInputMode] = useState('upload') // 'upload' or 'youtube'
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  
   // Settings
   const [numClips, setNumClips] = useState(10)
   const [minDuration, setMinDuration] = useState(20)
@@ -1361,6 +1365,46 @@ function VideoClipperPage() {
     } catch (err) {
       console.error('Upload failed:', err)
       alert('Upload failed: ' + err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleYoutubeSubmit = async () => {
+    if (!youtubeUrl.trim()) return
+
+    setUploading(true)
+    setJobResult(null)
+
+    try {
+      const res = await fetch(`${API_BASE}/clipper/youtube`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: youtubeUrl.trim(),
+          num_clips: numClips,
+          min_duration: minDuration,
+          max_duration: maxDuration,
+          pause_threshold: pauseThreshold,
+          caption_style: captionStyle,
+          whisper_model: whisperModel,
+          burn_captions: burnCaptions,
+          crop_vertical: cropVertical,
+          auto_center: autoCenter,
+        }),
+      })
+      const data = await res.json()
+      
+      if (data.job_id) {
+        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: 'Downloading from YouTube...' })
+        startPolling(data.job_id)
+        setYoutubeUrl('')
+      } else {
+        alert('Failed to start: ' + (data.detail || 'Unknown error'))
+      }
+    } catch (err) {
+      console.error('YouTube processing failed:', err)
+      alert('Failed: ' + err.message)
     } finally {
       setUploading(false)
     }
@@ -1530,25 +1574,71 @@ function VideoClipperPage() {
         </div>
       </div>
 
-      {/* Upload Section */}
+      {/* Input Section */}
       <div className="clipper-card upload-card">
-        <h3>📤 Upload Video</h3>
-        <p>Supported formats: MP4, MOV, AVI, MKV, WebM</p>
+        <h3>📥 Video Source</h3>
         
-        <label className="upload-zone">
-          <input 
-            type="file" 
-            accept="video/*"
-            onChange={handleUpload}
-            disabled={uploading || !isReady}
-          />
-          <div className="upload-content">
-            <span className="upload-icon">🎥</span>
-            <span className="upload-text">
-              {uploading ? 'Uploading...' : 'Click or drag to upload video'}
-            </span>
-          </div>
-        </label>
+        {/* Input Mode Tabs */}
+        <div className="input-mode-tabs">
+          <button 
+            className={`mode-tab ${inputMode === 'upload' ? 'active' : ''}`}
+            onClick={() => setInputMode('upload')}
+          >
+            📤 Upload File
+          </button>
+          <button 
+            className={`mode-tab ${inputMode === 'youtube' ? 'active' : ''}`}
+            onClick={() => setInputMode('youtube')}
+          >
+            ▶️ YouTube URL
+          </button>
+        </div>
+
+        {inputMode === 'upload' && (
+          <>
+            <p>Supported formats: MP4, MOV, AVI, MKV, WebM</p>
+            <label className="upload-zone">
+              <input 
+                type="file" 
+                accept="video/*"
+                onChange={handleUpload}
+                disabled={uploading || !isReady}
+              />
+              <div className="upload-content">
+                <span className="upload-icon">🎥</span>
+                <span className="upload-text">
+                  {uploading ? 'Uploading...' : 'Click or drag to upload video'}
+                </span>
+              </div>
+            </label>
+          </>
+        )}
+
+        {inputMode === 'youtube' && (
+          <>
+            <p>Paste a YouTube video URL to download and process</p>
+            <div className="youtube-input-group">
+              <input 
+                type="text"
+                className="youtube-url-input"
+                placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                disabled={uploading || !isReady}
+              />
+              <button 
+                className="btn btn-primary"
+                onClick={handleYoutubeSubmit}
+                disabled={uploading || !isReady || !youtubeUrl.trim()}
+              >
+                {uploading ? 'Processing...' : '🚀 Process'}
+              </button>
+            </div>
+            <p className="youtube-hint">
+              Supports: youtube.com/watch, youtu.be, youtube.com/shorts
+            </p>
+          </>
+        )}
       </div>
 
       {/* Progress */}

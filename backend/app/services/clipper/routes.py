@@ -216,6 +216,190 @@ async def upload_video(
     }
 
 
+class YouTubeRequest(BaseModel):
+    """Request for processing a YouTube video."""
+    url: str
+    num_clips: int = 10
+    min_duration: float = 20.0
+    max_duration: float = 60.0
+    pause_threshold: float = 0.7
+    caption_style: str = "default"
+    whisper_model: str = "base"
+    burn_captions: bool = True
+    crop_vertical: bool = True
+    auto_center: bool = True
+
+
+def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
+    """Download a YouTube video using yt-dlp."""
+    import yt_dlp
+    
+    output_path = output_dir / "input.mp4"
+    
+    ydl_opts = {
+        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+        'outtmpl': str(output_path.with_suffix('')),
+        'merge_output_format': 'mp4',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+    }
+    
+    # Update progress
+    _job_progress[job_id] = {
+        "status": "processing",
+        "progress": 0.02,
+        "stage": "Downloading video from YouTube..."
+    }
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    
+    # Find the downloaded file (might have different extension)
+    for ext in ['.mp4', '.mkv', '.webm']:
+        candidate = output_dir / f"input{ext}"
+        if candidate.exists():
+            return str(candidate)
+    
+    # Check if merged file exists
+    if output_path.exists():
+        return str(output_path)
+    
+    raise FileNotFoundError("Downloaded video file not found")
+
+
+@router.post("/youtube")
+async def process_youtube_video(
+    request: YouTubeRequest,
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Download and process a YouTube video.
+    
+    Accepts YouTube URLs like:
+    - https://www.youtube.com/watch?v=VIDEO_ID
+    - https://youtu.be/VIDEO_ID
+    - https://www.youtube.com/shorts/VIDEO_ID
+    
+    Returns a job_id to track progress.
+    """
+    # Validate dependencies
+    if not check_ffmpeg():
+        raise HTTPException(
+            status_code=503,
+            detail="FFmpeg is not installed. " + get_ffmpeg_install_instructions()
+        )
+    
+    try:
+        import faster_whisper
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="faster-whisper is not installed. Run: pip install faster-whisper"
+        )
+    
+    try:
+        import yt_dlp
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="yt-dlp is not installed. Run: pip install yt-dlp"
+        )
+    
+    # Validate URL
+    url = request.url.strip()
+    if not any(domain in url for domain in ['youtube.com', 'youtu.be']):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid URL. Please provide a YouTube video URL."
+        )
+    
+    # Create job ID
+    job_id = str(uuid.uuid4())[:8]
+    
+    # Create output directory
+    output_dir = CLIPS_OUTPUT_DIR / job_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize job progress
+    _job_progress[job_id] = {"status": "queued", "progress": 0.0, "stage": "Starting YouTube download..."}
+    
+    # Build config
+    config = PipelineConfig(
+        num_clips=request.num_clips,
+        min_duration=request.min_duration,
+        max_duration=request.max_duration,
+        pause_threshold=request.pause_threshold,
+        caption_style=request.caption_style,
+        whisper_model=request.whisper_model,
+        burn_captions=request.burn_captions,
+        crop_vertical=request.crop_vertical,
+        auto_center=request.auto_center,
+    )
+    
+    # Start processing in background
+    if background_tasks:
+        background_tasks.add_task(
+            run_youtube_job, job_id, url, str(output_dir), config
+        )
+    else:
+        asyncio.create_task(
+            asyncio.to_thread(run_youtube_job_sync, job_id, url, str(output_dir), config)
+        )
+    
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "message": "YouTube video download started. Processing will begin after download.",
+    }
+
+
+async def run_youtube_job(
+    job_id: str,
+    url: str,
+    output_dir: str,
+    config: PipelineConfig
+):
+    """Run the YouTube download and clipper pipeline as a background job."""
+    await asyncio.to_thread(run_youtube_job_sync, job_id, url, output_dir, config)
+
+
+def run_youtube_job_sync(
+    job_id: str,
+    url: str,
+    output_dir: str,
+    config: PipelineConfig
+):
+    """Synchronous YouTube job runner."""
+    try:
+        # Download video
+        _job_progress[job_id] = {
+            "status": "processing",
+            "progress": 0.01,
+            "stage": "Downloading from YouTube..."
+        }
+        
+        video_path = download_youtube_video(url, Path(output_dir), job_id)
+        
+        _job_progress[job_id] = {
+            "status": "processing",
+            "progress": 0.10,
+            "stage": "Download complete. Starting transcription..."
+        }
+        
+        # Now run the regular clipper job
+        run_clipper_job_sync(job_id, video_path, output_dir, config)
+        
+    except Exception as e:
+        logger.exception(f"YouTube job {job_id} failed")
+        _job_progress[job_id] = {
+            "status": "failed",
+            "progress": 0.0,
+            "stage": "Error",
+            "error": str(e)
+        }
+
+
 @router.post("/process-local")
 async def process_local_video(
     video_path: str,
