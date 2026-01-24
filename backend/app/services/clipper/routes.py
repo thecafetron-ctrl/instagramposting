@@ -1335,6 +1335,8 @@ async def smart_analyze_full_railway(
     manual_topic_select: bool = Form(False),
     caption_size: int = Form(80),
     add_stock_images: bool = Form(False),
+    caption_position: str = Form("middle-lower"),
+    remove_silence: bool = Form(True),
 ):
     """
     FULL Railway processing - download, transcribe, analyze, ALL on Railway.
@@ -1422,6 +1424,8 @@ async def smart_analyze_full_railway(
         "manual_topic_select": manual_topic_select,
         "caption_size": caption_size,
         "add_stock_images": add_stock_images,
+        "caption_position": caption_position,
+        "remove_silence": remove_silence,
     }
     
     background_tasks.add_task(

@@ -1415,11 +1415,13 @@ function VideoClipperPage() {
   const [videoVibe, setVideoVibe] = useState(savedSettings?.videoVibe ?? 'default')
   const [manualTopicSelect, setManualTopicSelect] = useState(savedSettings?.manualTopicSelect ?? false)
   const [captionSize, setCaptionSize] = useState(savedSettings?.captionSize ?? 80)
+  const [captionPosition, setCaptionPosition] = useState(savedSettings?.captionPosition ?? 'middle-lower')
   const [previewActiveWord, setPreviewActiveWord] = useState(0)
   const [showStylePanel, setShowStylePanel] = useState(false)
   const [clipEditRequests, setClipEditRequests] = useState({}) // {clipIndex: "edit request text"}
   const [postingStatus, setPostingStatus] = useState({}) // {clipIndex_platform: "loading" | "success" | "error"}
   const [addStockImages, setAddStockImages] = useState(savedSettings?.addStockImages ?? false)
+  const [removeSilence, setRemoveSilence] = useState(savedSettings?.removeSilence ?? true)
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
@@ -1427,10 +1429,10 @@ function VideoClipperPage() {
       numClips, minDuration, maxDuration, pauseThreshold,
       captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter,
       captionAnimation, captionColor, animationColor, titleStyle, titleColor,
-      videoVibe, manualTopicSelect, captionSize, addStockImages
+      videoVibe, manualTopicSelect, captionSize, addStockImages, captionPosition, removeSilence
     }
     localStorage.setItem('clipper_settings', JSON.stringify(settings))
-  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, captionAnimation, captionColor, animationColor, titleStyle, titleColor, videoVibe, manualTopicSelect, captionSize, addStockImages])
+  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, captionAnimation, captionColor, animationColor, titleStyle, titleColor, videoVibe, manualTopicSelect, captionSize, addStockImages, captionPosition, removeSilence])
 
   // Animate preview caption words
   useEffect(() => {
@@ -1540,6 +1542,8 @@ function VideoClipperPage() {
       formData.append('video_vibe', videoVibe)
       formData.append('manual_topic_select', manualTopicSelect)
       formData.append('caption_size', captionSize)
+      formData.append('caption_position', captionPosition)
+      formData.append('remove_silence', removeSilence)
       formData.append('add_stock_images', addStockImages)
 
       const res = await fetch(`${API_BASE}/clipper/smart/analyze-full`, {
@@ -1661,6 +1665,8 @@ function VideoClipperPage() {
       formData.append('caption_color', captionColor)
       formData.append('animation_color', animationColor)
       formData.append('caption_size', captionSize)
+      formData.append('caption_position', captionPosition)
+      formData.append('remove_silence', removeSilence)
       formData.append('video_vibe', videoVibe)
       
       const res = await fetch(`${API_BASE}/clipper/smart/edit-clip`, {
@@ -2347,6 +2353,39 @@ function VideoClipperPage() {
                   <button onClick={() => setCaptionSize(100)} className={captionSize === 100 ? 'active' : ''}>L</button>
                   <button onClick={() => setCaptionSize(120)} className={captionSize === 120 ? 'active' : ''}>XL</button>
                 </div>
+              </div>
+              
+              {/* Caption Position */}
+              <div className="caption-position-control">
+                <label>Caption Position:</label>
+                <div className="position-buttons">
+                  {[
+                    { id: 'top', name: '⬆️ Top', icon: '▔' },
+                    { id: 'middle', name: '➡️ Center', icon: '━' },
+                    { id: 'middle-lower', name: '⬇️ Lower', icon: '▁' },
+                    { id: 'bottom', name: '⏬ Bottom', icon: '▂' },
+                  ].map(pos => (
+                    <button
+                      key={pos.id}
+                      className={`position-btn ${captionPosition === pos.id ? 'active' : ''}`}
+                      onClick={() => setCaptionPosition(pos.id)}
+                    >
+                      {pos.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Remove Silence Toggle */}
+              <div className="remove-silence-toggle">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={removeSilence}
+                    onChange={(e) => setRemoveSilence(e.target.checked)}
+                  />
+                  <span>🔇 Remove silence gaps (max 0.2s between words)</span>
+                </label>
               </div>
               
               {/* Stock Images Toggle */}

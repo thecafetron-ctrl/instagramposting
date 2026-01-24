@@ -55,15 +55,20 @@ def render_final_clip(
         crop_filter = build_crop_filter(video_info, center_x)
         filters.append(crop_filter)
     
-    # Add scene change zoom effect (every 1.5 seconds)
-    # Use a simpler zoom effect that works on Railway
+    # Add scene change zoom effect (every 1.5 seconds) - ALWAYS enabled
     if enable_effects:
-        # Simple scale oscillation for zoom effect - lighter than zoompan
-        # This creates a subtle "pulse" zoom every 1.5s
-        zoom_expr = f"scale=iw*(1.02+0.04*sin(2*PI*t/{scene_change_interval})):ih*(1.02+0.04*sin(2*PI*t/{scene_change_interval})),crop=1080:1920"
-        # Only add if not on cloud OR if explicitly requested
-        if not IS_CLOUD:
-            filters.append(zoom_expr)
+        # Zoompan for smooth zoom in/out every 1.5 seconds
+        # This creates the dynamic "edited" feel that's essential for viral videos
+        # Using zoompan with smooth sine wave oscillation
+        # z oscillates between 1.0 and 1.08 (8% zoom)
+        # Center follows slight movement for more dynamic feel
+        zoom_filter = (
+            f"zoompan=z='1.0+0.08*sin(2*PI*t/{scene_change_interval})':"
+            f"x='iw/2-(iw/zoom/2)+10*sin(2*PI*t/{scene_change_interval*2})':"
+            f"y='ih/2-(ih/zoom/2)+10*cos(2*PI*t/{scene_change_interval*2})':"
+            f"d=1:s=1080x1920:fps=30"
+        )
+        filters.append(zoom_filter)
     
     # Add color grading for viral look
     if enable_effects:

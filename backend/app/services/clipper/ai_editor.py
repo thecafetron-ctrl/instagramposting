@@ -269,6 +269,113 @@ def detect_peak_moments(words: List[dict]) -> List[ClipMoment]:
     return peaks
 
 
+def remove_silence_gaps(
+    words: List[dict],
+    max_gap: float = 0.2,
+) -> List[Tuple[float, float]]:
+    """
+    Identify segments of speech with gaps no longer than max_gap.
+    Returns list of (start, end) tuples representing continuous speech.
+    
+    This removes long silences to keep videos engaging.
+    """
+    if not words:
+        return []
+    
+    segments = []
+    current_start = words[0].get("start", 0)
+    current_end = words[0].get("end", 0)
+    
+    for i in range(1, len(words)):
+        word = words[i]
+        word_start = word.get("start", 0)
+        word_end = word.get("end", 0)
+        
+        gap = word_start - current_end
+        
+        if gap <= max_gap:
+            # Continue current segment
+            current_end = word_end
+        else:
+            # Gap too large, save current segment and start new one
+            segments.append((current_start, current_end))
+            current_start = word_start
+            current_end = word_end
+    
+    # Don't forget the last segment
+    segments.append((current_start, current_end))
+    
+    return segments
+
+
+def get_speech_only_words(
+    words: List[dict],
+    max_gap: float = 0.2,
+) -> List[dict]:
+    """
+    Adjust word timestamps to remove silence gaps.
+    Returns words with adjusted timestamps for continuous speech.
+    """
+    if not words:
+        return []
+    
+    adjusted_words = []
+    time_offset = 0
+    last_end = words[0].get("start", 0)
+    
+    for word in words:
+        word_start = word.get("start", 0)
+        word_end = word.get("end", 0)
+        
+        gap = word_start - last_end
+        if gap > max_gap:
+            # Remove excess silence (keep max_gap worth)
+            time_offset += gap - max_gap
+        
+        adjusted_words.append({
+            **word,
+            "start": word_start - time_offset,
+            "end": word_end - time_offset,
+            "original_start": word_start,
+            "original_end": word_end,
+        })
+        
+        last_end = word_end
+    
+    return adjusted_words
+
+
+def build_silence_removal_filter(
+    words: List[dict],
+    max_gap: float = 0.2,
+) -> Tuple[str, List[dict]]:
+    """
+    Build FFmpeg filter to remove silence gaps and return adjusted words.
+    
+    Returns:
+        - FFmpeg select/concat filter string
+        - List of words with adjusted timestamps
+    """
+    segments = remove_silence_gaps(words, max_gap)
+    
+    if len(segments) <= 1:
+        return "", words  # No significant gaps to remove
+    
+    # Build FFmpeg select filter
+    # Format: select='between(t,start1,end1)+between(t,start2,end2)+...',setpts=N/FRAME_RATE/TB
+    select_parts = []
+    for start, end in segments:
+        select_parts.append(f"between(t,{start},{end})")
+    
+    select_filter = f"select='{'+'.join(select_parts)}',setpts=N/FRAME_RATE/TB"
+    audio_filter = f"aselect='{'+'.join(select_parts)}',asetpts=N/SR/TB"
+    
+    # Adjust word timestamps
+    adjusted_words = get_speech_only_words(words, max_gap)
+    
+    return f"{select_filter};{audio_filter}", adjusted_words
+
+
 def find_best_clip_boundaries(
     words: List[dict],
     target_duration: float = 30.0,
@@ -387,21 +494,33 @@ def generate_ass_header(
     animation_color: str = "#FFFF00",
     title_color: str = "#FFFF00",
     caption_size: int = 80,
+    caption_position: str = "middle-lower",  # "top", "middle", "middle-lower", "bottom"
 ) -> str:
-    """Generate ASS header with custom colors and size for BOX-PER-WORD style."""
+    """Generate ASS header with custom colors, size, and position for BOX-PER-WORD style."""
     # Convert colors
     main_color = hex_to_ass_color(caption_color)
     highlight_color = hex_to_ass_color(animation_color)
     header_color = hex_to_ass_color(title_color)
     # Background color for boxes (animation color with transparency)
-    box_bg_color = hex_to_ass_color(animation_color).replace("&H00", "&HAA")  # Semi-transparent
+    box_bg_color = hex_to_ass_color(animation_color).replace("&H00", "&H80")  # 50% transparent
     
     # Calculate scaled sizes
     header_size = int(caption_size * 1.375)  # 37% larger for title
     
+    # Position mapping (MarginV value and Alignment)
+    # Alignment: 1-3 = bottom, 4-6 = middle, 7-9 = top
+    # Within each row: 1/4/7 = left, 2/5/8 = center, 3/6/9 = right
+    position_config = {
+        "top": {"margin": 200, "align": 8},
+        "middle": {"margin": 0, "align": 5},
+        "middle-lower": {"margin": 400, "align": 5},  # 400 below center
+        "bottom": {"margin": 150, "align": 2},
+    }
+    pos = position_config.get(caption_position, position_config["middle-lower"])
+    margin_v = pos["margin"]
+    alignment = pos["align"]
+    
     # ASS header with BOX-PER-WORD styles
-    # BorderStyle=3 means opaque box, BorderStyle=1 means outline+shadow
-    # MarginV of 650 puts captions in middle-lower area
     return f"""[Script Info]
 Title: Dynamic Captions - Box Per Word
 ScriptType: v4.00+
@@ -411,9 +530,9 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,2,5,40,40,650,1
-Style: BoxWord,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,{box_bg_color},{box_bg_color},1,0,0,0,100,100,0,0,3,12,0,5,40,40,650,1
-Style: ActiveWord,Montserrat ExtraBold,{int(caption_size*1.1)},{highlight_color},&H000000FF,&H00000000,&HFF000000,1,0,0,0,105,105,0,0,3,15,0,5,40,40,650,1
+Style: Default,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,5,3,{alignment},40,40,{margin_v},1
+Style: BoxWord,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,{box_bg_color},{box_bg_color},1,0,0,0,100,100,0,0,3,14,0,{alignment},40,40,{margin_v},1
+Style: ActiveWord,Montserrat ExtraBold,{int(caption_size*1.15)},{highlight_color},&H000000FF,&H00000000,&HFF000000,1,0,0,0,110,110,0,0,3,16,0,{alignment},40,40,{margin_v},1
 Style: Header,Montserrat ExtraBold,{header_size},{header_color},&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,180,1
 
 [Events]
