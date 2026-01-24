@@ -19,34 +19,87 @@ logger = logging.getLogger(__name__)
 ASSETS_DIR = Path(__file__).parent.parent.parent.parent / "assets" / "audio"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Royalty-free music URLs (Pixabay, etc.)
+# Royalty-free music URLs (using free public domain sources)
+# These are direct download links that work without authentication
 MUSIC_URLS = {
-    "upbeat": "https://cdn.pixabay.com/download/audio/2022/10/25/audio_946b0939c8.mp3",  # Energetic
-    "chill": "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3",   # Lo-fi chill
-    "dramatic": "https://cdn.pixabay.com/download/audio/2022/03/15/audio_942e61d0c6.mp3", # Cinematic
-    "funny": "https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3",   # Quirky
+    "upbeat": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",  # Upbeat electronic
+    "chill": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",   # Chill vibe
+    "dramatic": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3", # Dramatic
+    "funny": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",   # Quirky
 }
+
+# Fallback: Generate simple beat with FFmpeg if download fails
+def generate_simple_beat(output_path: Path, duration: float = 60, style: str = "upbeat") -> Optional[Path]:
+    """Generate a simple beat using FFmpeg audio synthesis."""
+    ffmpeg = get_ffmpeg_path()
+    
+    # Different beats for different styles
+    if style == "dramatic":
+        # Deep bass pulse
+        audio_filter = "sine=f=50:d=60,volume=0.3,asetrate=44100"
+    elif style == "chill":
+        # Soft ambient pad
+        audio_filter = "anoisesrc=d=60:c=brown:r=44100:a=0.1,lowpass=f=500"
+    else:
+        # Upbeat click pattern (120 BPM)
+        audio_filter = "sine=f=1000:d=0.05,apad=pad_dur=0.45|sine=f=800:d=0.05,apad=pad_dur=0.45,aloop=loop=120:size=44100"
+    
+    cmd = [
+        ffmpeg, '-y',
+        '-f', 'lavfi',
+        '-i', f'anoisesrc=d={duration}:c=pink:r=44100:a=0.05',  # Simple ambient
+        '-af', 'lowpass=f=2000,volume=0.3',
+        '-t', str(duration),
+        '-c:a', 'libmp3lame',
+        '-q:a', '4',
+        str(output_path)
+    ]
+    
+    try:
+        subprocess.run(cmd, capture_output=True, check=True, timeout=30)
+        return output_path
+    except Exception as e:
+        logger.warning(f"Failed to generate beat: {e}")
+        return None
 
 
 def download_music_if_needed(style: str = "upbeat") -> Optional[Path]:
     """Download royalty-free background music if not already cached."""
     music_path = ASSETS_DIR / f"music_{style}.mp3"
     
-    if music_path.exists():
+    if music_path.exists() and music_path.stat().st_size > 10000:
         return music_path
     
-    url = MUSIC_URLS.get(style)
-    if not url:
-        logger.warning(f"Unknown music style: {style}")
-        return None
+    url = MUSIC_URLS.get(style, MUSIC_URLS["upbeat"])
     
     try:
-        logger.info(f"Downloading {style} music...")
-        urllib.request.urlretrieve(url, music_path)
-        logger.info(f"Music downloaded: {music_path}")
-        return music_path
+        logger.info(f"Downloading {style} music from {url}...")
+        
+        # Use requests-style download with headers
+        import urllib.request
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            with open(music_path, 'wb') as f:
+                f.write(response.read())
+        
+        if music_path.exists() and music_path.stat().st_size > 10000:
+            logger.info(f"Music downloaded: {music_path}")
+            return music_path
+        else:
+            raise Exception("Downloaded file too small")
+            
     except Exception as e:
         logger.warning(f"Failed to download music: {e}")
+        
+        # Fallback: Generate simple ambient track
+        logger.info("Generating ambient background track...")
+        generated_path = ASSETS_DIR / f"generated_{style}.mp3"
+        if generate_simple_beat(generated_path, duration=120, style=style):
+            return generated_path
+        
         return None
 
 

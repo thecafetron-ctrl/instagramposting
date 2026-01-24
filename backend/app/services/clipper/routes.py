@@ -1864,6 +1864,7 @@ def run_full_railway_processing(
             
             # Use AI editor for enhanced rendering
             try:
+                add_job_log(job_id, f"   🎨 AI Editor: captions + effects + hook optimization")
                 edited_result = ai_editor.edit_clip(
                     source_video=input_path,
                     output_path=clip_path,
@@ -1871,8 +1872,8 @@ def run_full_railway_processing(
                     start_time=clip["start_time"],
                     end_time=clip["end_time"],
                     burn_captions=burn_captions,
-                    add_music=False,
-                    add_effects=False,  # Keep simple for now to avoid FFmpeg complexity
+                    add_music=True,  # ENABLED: Add background music
+                    add_effects=True,  # ENABLED: Add zoom/color effects
                     optimize_boundaries=True,  # AI-optimize hooks and endings
                 )
                 thumb_path = edited_result.thumbnail_path
