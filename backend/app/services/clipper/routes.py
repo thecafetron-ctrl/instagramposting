@@ -358,24 +358,28 @@ def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
             update_job_progress(job_id, "processing", 0.10, "Download complete", "Merging audio/video...")
     
     ydl_opts = {
-        'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+        'format': 'best[height<=1080]/bestvideo[height<=1080]+bestaudio/best',
         'outtmpl': str(output_path.with_suffix('')),
         'merge_output_format': 'mp4',
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
         'progress_hooks': [progress_hook],
-        'socket_timeout': 30,
-        'retries': 3,
-        # Fix for 403 Forbidden errors
+        'socket_timeout': 60,
+        'retries': 10,
+        'fragment_retries': 10,
+        # Fix for 403 Forbidden errors - use android_creator client
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
+                'player_client': ['android_creator', 'android', 'web'],
             }
         },
+        'nocheckcertificate': True,
     }
     
     update_job_progress(job_id, "processing", 0.02, "Connecting to YouTube", "Fetching video info...")
@@ -1228,20 +1232,24 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
     
     try:
         ydl_opts = {
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+            'format': 'best[height<=1080]/bestvideo[height<=1080]+bestaudio/best',
             'outtmpl': str(input_path.with_suffix('')),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
-            # Fix for 403 Forbidden errors
+            # Fix for 403 Forbidden errors - use android_creator
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],
+                    'player_client': ['android_creator', 'android', 'web'],
                 }
             },
+            'nocheckcertificate': True,
+            'retries': 10,
+            'fragment_retries': 10,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1540,8 +1548,8 @@ def run_full_railway_processing(
             output_template = str(job_dir / "input.%(ext)s")
             
             ydl_opts = {
-                # Simpler format selection - just get best available
-                'format': 'best[height<=720]/best',
+                # Use simple format to avoid 403 - don't try to merge
+                'format': 'best[height<=720]/bestvideo[height<=720]+bestaudio/best',
                 'outtmpl': output_template,
                 'progress_hooks': [progress_hook],
                 'quiet': False,
@@ -1551,20 +1559,28 @@ def run_full_railway_processing(
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4',
                 }],
-                # Fix for 403 Forbidden errors - use iOS client which has fewer restrictions
+                # Fix for 403 Forbidden - use android_creator client (most reliable)
                 'http_headers': {
-                    'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Connection': 'keep-alive',
                 },
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['ios', 'android', 'web'],
-                        'player_skip': ['webpage', 'configs'],
+                        # android_creator bypasses most 403 errors
+                        'player_client': ['android_creator', 'android', 'web'],
                     }
                 },
-                # Additional options to help with restricted videos
+                # Bypass various restrictions
+                'nocheckcertificate': True,
+                'ignoreerrors': False,
+                'age_limit': None,  # Don't skip age-restricted videos
+                # Retry settings
                 'socket_timeout': 60,
-                'retries': 5,
-                'fragment_retries': 5,
+                'retries': 10,
+                'fragment_retries': 10,
+                'file_access_retries': 5,
             }
             
             try:
@@ -2050,20 +2066,24 @@ def download_video_only(job_id: str, job_dir: Path, youtube_url: str):
         add_job_log(job_id, "Fetching video info from YouTube...")
         
         ydl_opts = {
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
+            'format': 'best[height<=1080]/bestvideo[height<=1080]+bestaudio/best',
             'outtmpl': str(input_path.with_suffix('')),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
-            # Fix for 403 Forbidden errors
+            # Fix for 403 Forbidden errors - use android_creator client
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],
+                    'player_client': ['android_creator', 'android', 'web'],
                 }
             },
+            'nocheckcertificate': True,
+            'retries': 10,
+            'fragment_retries': 10,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2153,7 +2173,7 @@ def run_smart_analysis(
             output_template = str(job_dir / "input.%(ext)s")
             
             ydl_opts = {
-                'format': 'best[height<=720]/best',
+                'format': 'best[height<=720]/bestvideo[height<=720]+bestaudio/best',
                 'outtmpl': output_template,
                 'progress_hooks': [progress_hook],
                 'quiet': False,
@@ -2163,16 +2183,19 @@ def run_smart_analysis(
                     'preferedformat': 'mp4',
                 }],
                 'http_headers': {
-                    'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
                 },
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['ios', 'android', 'web'],
-                        'player_skip': ['webpage', 'configs'],
+                        'player_client': ['android_creator', 'android', 'web'],
                     }
                 },
+                'nocheckcertificate': True,
                 'socket_timeout': 60,
-                'retries': 5,
+                'retries': 10,
+                'fragment_retries': 10,
             }
             
             try:
