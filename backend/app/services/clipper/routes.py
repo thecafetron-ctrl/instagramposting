@@ -365,8 +365,17 @@ def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
         'no_warnings': True,
         'extract_flat': False,
         'progress_hooks': [progress_hook],
-        'socket_timeout': 30,  # Timeout for network operations
+        'socket_timeout': 30,
         'retries': 3,
+        # Fix for 403 Forbidden errors
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+            }
+        },
     }
     
     update_job_progress(job_id, "processing", 0.02, "Connecting to YouTube", "Fetching video info...")
@@ -1224,6 +1233,15 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
+            # Fix for 403 Forbidden errors
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],
+                }
+            },
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1520,6 +1538,16 @@ def run_full_railway_processing(
                 'merge_output_format': 'mp4',
                 'progress_hooks': [progress_hook],
                 'quiet': True,
+                # Fix for 403 Forbidden errors
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web'],
+                    }
+                },
+                'cookiefile': None,  # Can be set to a cookies.txt if needed
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1950,6 +1978,15 @@ def download_video_only(job_id: str, job_dir: Path, youtube_url: str):
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
+            # Fix for 403 Forbidden errors
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],
+                }
+            },
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2042,6 +2079,15 @@ def run_smart_analysis(
                 'merge_output_format': 'mp4',
                 'progress_hooks': [progress_hook],
                 'quiet': True,
+                # Fix for 403 Forbidden errors
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web'],
+                    }
+                },
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2522,3 +2568,224 @@ async def get_clip_history(limit: int = 20):
         "history": _clip_history[:limit],
         "total": len(_clip_history),
     }
+
+
+# ============================================================================
+# Social Media Posting Endpoints
+# ============================================================================
+
+@router.post("/post/instagram")
+async def post_to_instagram(
+    job_id: str = Form(""),
+    clip_index: int = Form(0),
+    video_url: str = Form(""),
+    caption: str = Form(""),
+    hook: str = Form(""),
+    category: str = Form("default"),
+):
+    """Post a clip to Instagram Reels."""
+    from ..social_posting import SocialMediaManager
+    from ...config import get_settings
+    
+    settings = get_settings()
+    manager = SocialMediaManager(settings)
+    
+    # If video_url not provided, construct from job_id
+    if not video_url and job_id:
+        video_url = f"/api/clipper/clips/{job_id}/clip_{clip_index + 1:02d}.mp4"
+    
+    if not video_url:
+        return {"success": False, "error": "No video URL provided"}
+    
+    # Make absolute URL for Instagram
+    base_url = os.environ.get("BASE_URL", "https://instagramposting-production-4e91.up.railway.app")
+    if video_url.startswith("/"):
+        video_url = f"{base_url}{video_url}"
+    
+    result = await manager.post_to_instagram(video_url, caption, hook, category)
+    return result
+
+
+@router.post("/post/tiktok")
+async def post_to_tiktok(
+    job_id: str = Form(""),
+    clip_index: int = Form(0),
+    video_url: str = Form(""),
+    caption: str = Form(""),
+    hook: str = Form(""),
+    category: str = Form("default"),
+):
+    """Post a clip to TikTok."""
+    from ..social_posting import SocialMediaManager
+    from ...config import get_settings
+    
+    settings = get_settings()
+    manager = SocialMediaManager(settings)
+    
+    # If video_url not provided, construct from job_id
+    if not video_url and job_id:
+        video_url = f"/api/clipper/clips/{job_id}/clip_{clip_index + 1:02d}.mp4"
+    
+    if not video_url:
+        return {"success": False, "error": "No video URL provided"}
+    
+    # Make absolute URL for TikTok (must be from allowed domain)
+    base_url = os.environ.get("BASE_URL", "https://mccarthydemo.site")
+    if video_url.startswith("/"):
+        video_url = f"{base_url}{video_url}"
+    
+    result = await manager.post_to_tiktok(video_url, caption, hook, category)
+    return result
+
+
+@router.post("/post/youtube")
+async def post_to_youtube(
+    job_id: str = Form(""),
+    clip_index: int = Form(0),
+    caption: str = Form(""),
+    hook: str = Form(""),
+    category: str = Form("default"),
+):
+    """Post a clip to YouTube Shorts."""
+    from ..social_posting import SocialMediaManager
+    from ...config import get_settings
+    
+    settings = get_settings()
+    manager = SocialMediaManager(settings)
+    
+    if not job_id:
+        return {"success": False, "error": "Job ID required for YouTube upload"}
+    
+    # Get video file path
+    job_dir = GENERATED_DIR / job_id
+    clip_name = f"clip_{clip_index + 1:02d}"
+    video_path = job_dir / "clips" / f"{clip_name}.mp4"
+    
+    if not video_path.exists():
+        return {"success": False, "error": f"Video file not found: {video_path}"}
+    
+    result = await manager.post_to_youtube(video_path, caption, hook, category)
+    return result
+
+
+@router.post("/post/all")
+async def post_to_all_platforms(
+    job_id: str = Form(""),
+    clip_index: int = Form(0),
+    video_url: str = Form(""),
+    caption: str = Form(""),
+    hook: str = Form(""),
+    category: str = Form("default"),
+):
+    """Post a clip to all configured platforms (Instagram, TikTok, YouTube)."""
+    from ..social_posting import SocialMediaManager
+    from ...config import get_settings
+    
+    settings = get_settings()
+    manager = SocialMediaManager(settings)
+    
+    if not job_id:
+        return {"success": False, "error": "Job ID required"}
+    
+    # Get video file path for YouTube
+    job_dir = GENERATED_DIR / job_id
+    clip_name = f"clip_{clip_index + 1:02d}"
+    video_path = job_dir / "clips" / f"{clip_name}.mp4"
+    
+    # Construct video URL for Instagram/TikTok
+    if not video_url:
+        video_url = f"/api/clipper/clips/{job_id}/clip_{clip_index + 1:02d}.mp4"
+    
+    # Make absolute URL
+    base_url = os.environ.get("BASE_URL", "https://instagramposting-production-4e91.up.railway.app")
+    if video_url.startswith("/"):
+        full_video_url = f"{base_url}{video_url}"
+    else:
+        full_video_url = video_url
+    
+    # TikTok needs the custom domain
+    tiktok_url = full_video_url.replace(base_url, "https://mccarthydemo.site") if settings.tiktok_client_key else full_video_url
+    
+    results = await manager.post_to_all(
+        video_path=video_path,
+        video_url=full_video_url,
+        caption=caption,
+        hook=hook,
+        category=category,
+    )
+    
+    return results
+
+
+@router.get("/post/status")
+async def get_posting_status():
+    """Check which platforms are configured for posting."""
+    from ...config import get_settings
+    
+    settings = get_settings()
+    
+    return {
+        "instagram": {
+            "configured": bool(settings.instagram_access_token),
+            "ready": bool(settings.instagram_access_token),
+        },
+        "tiktok": {
+            "configured": bool(settings.tiktok_client_key),
+            "ready": bool(settings.tiktok_client_key and settings.tiktok_access_token),
+            "auth_url": f"https://mccarthydemo.site/tiktok/auth" if settings.tiktok_client_key else None,
+        },
+        "youtube": {
+            "configured": bool(settings.youtube_api_key),
+            "ready": bool(settings.youtube_refresh_token),
+            "needs_oauth": bool(settings.youtube_api_key and not settings.youtube_refresh_token),
+        },
+    }
+
+
+# TikTok OAuth callback
+@router.get("/tiktok/callback")
+async def tiktok_oauth_callback(code: str = "", state: str = ""):
+    """Handle TikTok OAuth callback."""
+    from ..social_posting import exchange_tiktok_code
+    from ...config import get_settings
+    
+    if not code:
+        return {"error": "No authorization code received"}
+    
+    settings = get_settings()
+    
+    result = await exchange_tiktok_code(
+        code=code,
+        client_key=settings.tiktok_client_key,
+        client_secret=settings.tiktok_client_secret,
+        redirect_uri=settings.tiktok_redirect_uri,
+    )
+    
+    if "access_token" in result:
+        # In production, you'd want to save this token
+        return {
+            "success": True,
+            "message": "TikTok connected! Copy this access token to your environment:",
+            "access_token": result["access_token"],
+            "refresh_token": result.get("refresh_token"),
+            "expires_in": result.get("expires_in"),
+        }
+    
+    return {"success": False, "error": result}
+
+
+@router.get("/tiktok/auth")
+async def tiktok_auth_redirect():
+    """Redirect to TikTok OAuth."""
+    from ..social_posting import get_tiktok_auth_url
+    from ...config import get_settings
+    from fastapi.responses import RedirectResponse
+    
+    settings = get_settings()
+    
+    auth_url = get_tiktok_auth_url(
+        client_key=settings.tiktok_client_key,
+        redirect_uri=settings.tiktok_redirect_uri,
+    )
+    
+    return RedirectResponse(url=auth_url)

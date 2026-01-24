@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     instagram_app_secret: str = ""  # Set via INSTAGRAM_APP_SECRET env var
     instagram_access_token: str = ""  # Set via INSTAGRAM_ACCESS_TOKEN env var
     
+    # YouTube API
+    youtube_api_key: str = ""  # Set via YOUTUBE_API_KEY env var
+    youtube_client_id: str = ""  # Set via YOUTUBE_CLIENT_ID env var
+    youtube_client_secret: str = ""  # Set via YOUTUBE_CLIENT_SECRET env var
+    youtube_refresh_token: str = ""  # Set via YOUTUBE_REFRESH_TOKEN env var
+    
+    # TikTok API
+    tiktok_client_key: str = ""  # Set via TIKTOK_CLIENT_KEY env var
+    tiktok_client_secret: str = ""  # Set via TIKTOK_CLIENT_SECRET env var
+    tiktok_access_token: str = ""  # Set via TIKTOK_ACCESS_TOKEN env var
+    tiktok_redirect_uri: str = "https://mccarthydemo.site/tiktok/callback"  # Your domain
+    
     # Unsplash API
     unsplash_access_key: str = ""  # Set via UNSPLASH_ACCESS_KEY env var
     unsplash_secret_key: str = ""  # Set via UNSPLASH_SECRET_KEY env var

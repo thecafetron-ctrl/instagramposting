@@ -1418,6 +1418,7 @@ function VideoClipperPage() {
   const [previewActiveWord, setPreviewActiveWord] = useState(0)
   const [showStylePanel, setShowStylePanel] = useState(false)
   const [clipEditRequests, setClipEditRequests] = useState({}) // {clipIndex: "edit request text"}
+  const [postingStatus, setPostingStatus] = useState({}) // {clipIndex_platform: "loading" | "success" | "error"}
   const [addStockImages, setAddStockImages] = useState(savedSettings?.addStockImages ?? false)
 
   // Save settings to localStorage whenever they change
@@ -1679,6 +1680,94 @@ function VideoClipperPage() {
     } catch (err) {
       console.error('Edit request failed:', err)
       alert('Failed to submit edit request')
+    }
+  }
+
+  // Social media posting handlers
+  const handlePostToSocial = async (platform, clip, clipIndex) => {
+    setPostingStatus(prev => ({ ...prev, [`${clipIndex}_${platform}`]: 'loading' }))
+    
+    try {
+      const formData = new FormData()
+      formData.append('job_id', currentJob?.id || '')
+      formData.append('clip_index', clipIndex)
+      formData.append('video_url', clip.video_url)
+      formData.append('caption', clip.suggested_caption || '')
+      formData.append('hook', clip.hook || clip.text?.substring(0, 100) || '')
+      formData.append('category', clip.category || 'default')
+      
+      const res = await fetch(`${API_BASE}/clipper/post/${platform}`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      
+      if (data.success) {
+        setPostingStatus(prev => ({
+          ...prev,
+          [`${clipIndex}_${platform}`]: 'success',
+          [`${clipIndex}_result`]: { success: true, message: `✅ Posted to ${platform}! ${data.url || ''}` }
+        }))
+      } else {
+        setPostingStatus(prev => ({
+          ...prev,
+          [`${clipIndex}_${platform}`]: 'error',
+          [`${clipIndex}_result`]: { success: false, message: `❌ ${platform} failed: ${data.error}` }
+        }))
+      }
+    } catch (err) {
+      console.error(`Post to ${platform} failed:`, err)
+      setPostingStatus(prev => ({
+        ...prev,
+        [`${clipIndex}_${platform}`]: 'error',
+        [`${clipIndex}_result`]: { success: false, message: `❌ Failed to post to ${platform}` }
+      }))
+    }
+  }
+
+  const handlePostToAll = async (clip, clipIndex) => {
+    setPostingStatus(prev => ({ ...prev, [`${clipIndex}_all`]: 'loading' }))
+    
+    try {
+      const formData = new FormData()
+      formData.append('job_id', currentJob?.id || '')
+      formData.append('clip_index', clipIndex)
+      formData.append('video_url', clip.video_url)
+      formData.append('caption', clip.suggested_caption || '')
+      formData.append('hook', clip.hook || clip.text?.substring(0, 100) || '')
+      formData.append('category', clip.category || 'default')
+      
+      const res = await fetch(`${API_BASE}/clipper/post/all`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      
+      const results = []
+      if (data.instagram?.success) results.push('✅ Instagram')
+      else if (data.instagram?.error) results.push(`❌ IG: ${data.instagram.error}`)
+      
+      if (data.tiktok?.success) results.push('✅ TikTok')
+      else if (data.tiktok?.error) results.push(`❌ TT: ${data.tiktok.error}`)
+      
+      if (data.youtube?.success) results.push('✅ YouTube')
+      else if (data.youtube?.error) results.push(`❌ YT: ${data.youtube.error}`)
+      
+      setPostingStatus(prev => ({
+        ...prev,
+        [`${clipIndex}_all`]: data.success_count > 0 ? 'success' : 'error',
+        [`${clipIndex}_result`]: { 
+          success: data.success_count > 0, 
+          message: results.join(' | ') || 'No platforms configured'
+        }
+      }))
+    } catch (err) {
+      console.error('Post to all failed:', err)
+      setPostingStatus(prev => ({
+        ...prev,
+        [`${clipIndex}_all`]: 'error',
+        [`${clipIndex}_result`]: { success: false, message: '❌ Failed to post' }
+      }))
     }
   }
   
@@ -2807,6 +2896,43 @@ function VideoClipperPage() {
                   >
                     ⬇️ Download
                   </a>
+                  
+                  {/* Social Media Posting Buttons */}
+                  <div className="social-post-buttons">
+                    <button 
+                      className="btn btn-instagram btn-sm"
+                      onClick={() => handlePostToSocial('instagram', clip, idx)}
+                      disabled={postingStatus[`${idx}_instagram`] === 'loading'}
+                    >
+                      {postingStatus[`${idx}_instagram`] === 'loading' ? '⏳' : '📷'} Instagram
+                    </button>
+                    <button 
+                      className="btn btn-tiktok btn-sm"
+                      onClick={() => handlePostToSocial('tiktok', clip, idx)}
+                      disabled={postingStatus[`${idx}_tiktok`] === 'loading'}
+                    >
+                      {postingStatus[`${idx}_tiktok`] === 'loading' ? '⏳' : '🎵'} TikTok
+                    </button>
+                    <button 
+                      className="btn btn-youtube btn-sm"
+                      onClick={() => handlePostToSocial('youtube', clip, idx)}
+                      disabled={postingStatus[`${idx}_youtube`] === 'loading'}
+                    >
+                      {postingStatus[`${idx}_youtube`] === 'loading' ? '⏳' : '▶️'} YouTube
+                    </button>
+                    <button 
+                      className="btn btn-all-platforms btn-sm"
+                      onClick={() => handlePostToAll(clip, idx)}
+                      disabled={postingStatus[`${idx}_all`] === 'loading'}
+                    >
+                      {postingStatus[`${idx}_all`] === 'loading' ? '⏳ Posting...' : '🚀 Post to All'}
+                    </button>
+                  </div>
+                  {postingStatus[`${idx}_result`] && (
+                    <div className={`posting-result ${postingStatus[`${idx}_result`].success ? 'success' : 'error'}`}>
+                      {postingStatus[`${idx}_result`].message}
+                    </div>
+                  )}
                   
                   {/* AI Edit Request Box */}
                   <div className="clip-edit-request">

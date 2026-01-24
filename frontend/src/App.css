@@ -4004,3 +4004,89 @@
 .clip-edit-request .btn {
   width: 100%;
 }
+
+/* Social Media Posting Buttons */
+.social-post-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.btn-instagram {
+  background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888) !important;
+  border: none !important;
+  color: white !important;
+  font-weight: 600;
+}
+
+.btn-instagram:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-tiktok {
+  background: linear-gradient(135deg, #00f2ea, #ff0050) !important;
+  border: none !important;
+  color: white !important;
+  font-weight: 600;
+}
+
+.btn-tiktok:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-youtube {
+  background: #ff0000 !important;
+  border: none !important;
+  color: white !important;
+  font-weight: 600;
+}
+
+.btn-youtube:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-all-platforms {
+  grid-column: span 2;
+  background: linear-gradient(135deg, var(--color-accent), #9c27b0, #ff5722) !important;
+  border: none !important;
+  color: white !important;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.75rem !important;
+}
+
+.btn-all-platforms:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.social-post-buttons button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.posting-result {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.posting-result.success {
+  background: rgba(0, 200, 100, 0.15);
+  color: #00c864;
+  border: 1px solid rgba(0, 200, 100, 0.3);
+}
+
+.posting-result.error {
+  background: rgba(255, 100, 100, 0.15);
+  color: #ff6464;
+  border: 1px solid rgba(255, 100, 100, 0.3);
+}
