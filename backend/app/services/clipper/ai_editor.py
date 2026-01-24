@@ -394,7 +394,8 @@ def generate_enhanced_ass_subtitle(
             color=color_code,
         )
     
-    # ASS header with multiple styles
+    # ASS header with CENTERED styles (Alignment 5 = center middle)
+    # MarginV of 400 puts it roughly in middle of 1920px vertical video
     ass_content = """[Script Info]
 Title: Dynamic Captions
 ScriptType: v4.00+
@@ -404,10 +405,11 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Montserrat,72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,120,1
-Style: Hook,Montserrat,84,&H00FFFF00,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,5,3,2,40,40,120,1
-Style: Peak,Montserrat,80,&H0000FF00,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,120,1
-Style: Emphasis,Montserrat,90,&H00FF00FF,&H000000FF,&H00000000,&H80000000,1,0,0,0,110,110,0,0,1,5,3,2,40,40,120,1
+Style: Default,Montserrat ExtraBold,80,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,500,1
+Style: Hook,Montserrat ExtraBold,90,&H00FFFF00,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,6,4,5,40,40,500,1
+Style: Peak,Montserrat ExtraBold,85,&H0000FF00,&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,500,1
+Style: Emphasis,Montserrat ExtraBold,95,&H00FF00FF,&H000000FF,&H00000000,&HAA000000,1,0,0,0,110,110,0,0,1,6,4,5,40,40,500,1
+Style: Header,Montserrat ExtraBold,110,&H0000FFFF,&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,200,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -426,13 +428,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if current_line:
         lines.append(current_line)
     
-    # Generate events for each line
+    # Generate hook header for first 3-4 seconds
+    if words:
+        full_text = " ".join(w.get("word", "") for w in words)
+        hook_header = generate_hook_header(full_text)
+        
+        # Add header at top of screen for first 3.5 seconds
+        ass_content += f"Dialogue: 1,0:00:00.00,0:00:03.50,Header,,0,0,0,,{hook_header}\n"
+    
+    # Generate events for each line (CENTERED captions)
     for line in lines:
         if not line:
             continue
             
         start_time = line[0][1].get("start", 0) + time_offset
         end_time = line[-1][1].get("end", 0) + time_offset
+        
+        # Skip negative times
+        if end_time < 0:
+            continue
+        start_time = max(0, start_time)
         
         # Determine line style based on content
         line_style = "Default"
@@ -447,12 +462,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if start_time < 3:
             line_style = "Hook"
         
-        # Build the text with karaoke timing
+        # Build the text with karaoke timing and WORD-BY-WORD animation
         text_parts = []
         for idx, word in line:
             word_text = word.get("word", "")
             word_start = word.get("start", 0) + time_offset
             word_duration = int((word.get("end", word_start) - word_start) * 100)
+            word_duration = max(10, word_duration)  # Minimum 0.1s per word
             
             # Apply effects
             if idx in effect_map:
@@ -460,16 +476,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if effect.color:
                     word_text = f"{{{effect.color}}}{word_text}{{\\c&HFFFFFF&}}"
                 if effect.effect_type == "size":
-                    word_text = f"{{\\fscx120\\fscy120}}{word_text}{{\\fscx100\\fscy100}}"
+                    word_text = f"{{\\fscx130\\fscy130}}{word_text}{{\\fscx100\\fscy100}}"
+                if effect.effect_type == "pop":
+                    # Add pop animation
+                    word_text = f"{{\\t(0,100,\\fscx120\\fscy120)\\t(100,200,\\fscx100\\fscy100)}}{word_text}"
             
-            # Karaoke timing
-            text_parts.append(f"{{\\k{word_duration}}}{word_text}")
+            # Karaoke timing with fill effect
+            text_parts.append(f"{{\\kf{word_duration}}}{word_text}")
         
         text = " ".join(text_parts)
         
         # Format times
         start_str = format_ass_time(max(0, start_time))
-        end_str = format_ass_time(end_time)
+        end_str = format_ass_time(max(0.1, end_time))
         
         ass_content += f"Dialogue: 0,{start_str},{end_str},{line_style},,0,0,0,,{text}\n"
     
@@ -493,41 +512,98 @@ def format_ass_time(seconds: float) -> str:
 # Video Effects via FFmpeg
 # ============================================================================
 
+def build_scene_change_filter(clip_duration: float, interval: float = 1.5) -> str:
+    """
+    Build FFmpeg filter for scene changes every X seconds.
+    Alternates between zoom in and zoom out for dynamic feel.
+    """
+    # Calculate number of scene changes
+    num_scenes = int(clip_duration / interval)
+    if num_scenes < 2:
+        return ""
+    
+    # Create alternating zoom expressions
+    # Using sendcmd to change zoom at intervals
+    zoom_expressions = []
+    
+    for i in range(num_scenes):
+        start_time = i * interval
+        end_time = (i + 1) * interval
+        
+        # Alternate between zoom in (1.0 -> 1.15) and zoom out (1.15 -> 1.0)
+        if i % 2 == 0:
+            # Zoom in during this segment
+            zoom_expr = f"if(between(t,{start_time},{end_time}),1+0.1*((t-{start_time})/{interval})"
+        else:
+            # Zoom out during this segment  
+            zoom_expr = f"if(between(t,{start_time},{end_time}),1.1-0.1*((t-{start_time})/{interval})"
+        
+        zoom_expressions.append(zoom_expr)
+    
+    # Fallback to 1.0 if no condition matches
+    combined_zoom = "+".join([f"({z},0)" for z in zoom_expressions]) + "+1)"
+    
+    return f"zoompan=z='{combined_zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30"
+
+
 def build_effects_filter(
     moments: List[ClipMoment],
     clip_duration: float,
     enable_zoom: bool = True,
-    enable_shake: bool = True,
-    enable_flash: bool = True,
+    enable_color_grade: bool = True,
+    scene_change_interval: float = 1.5,
 ) -> str:
     """
     Build FFmpeg filter string for dynamic video effects.
     
     Effects:
-    - Subtle zoom on peaks
-    - Camera shake on emphasis
-    - Flash/brightness on hooks
+    - Scene changes every 1.5s (zoom in/out)
+    - Color grading for viral look
+    - Subtle vignette
+    - Sharpening
     """
     filters = []
     
-    # Base crop for vertical
-    # This will be added separately
-    
-    # Ken Burns style subtle zoom throughout
+    # Dynamic zoom with scene changes every 1.5 seconds
     if enable_zoom:
-        # Gentle zoom from 1.0 to 1.05 over the clip
-        filters.append(f"zoompan=z='1+0.0005*in':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920")
+        # Simpler approach: continuous subtle zoom pulse
+        # Zoom oscillates between 1.0 and 1.1 every 1.5 seconds
+        zoom_filter = f"zoompan=z='1.05+0.05*sin(2*PI*t/{scene_change_interval})':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30"
+        filters.append(zoom_filter)
     
-    # Add subtle vignette for cinematic look
-    filters.append("vignette=PI/4")
-    
-    # Color grading for social media pop
-    filters.append("eq=contrast=1.1:brightness=0.02:saturation=1.2")
-    
-    # Slight sharpening
-    filters.append("unsharp=5:5:0.5:5:5:0")
+    if enable_color_grade:
+        # Cinematic color grading - boost contrast and saturation for viral look
+        filters.append("eq=contrast=1.15:brightness=0.03:saturation=1.25:gamma=1.05")
+        
+        # Add subtle vignette for cinematic look
+        filters.append("vignette=PI/5")
+        
+        # Slight sharpening for crisp text/faces
+        filters.append("unsharp=5:5:0.8:5:5:0.4")
+        
+        # Curves for that "Instagram filter" look - lift shadows, compress highlights
+        filters.append("curves=preset=lighter")
     
     return ",".join(filters) if filters else ""
+
+
+def build_color_grade_filter(style: str = "viral") -> str:
+    """
+    Build color grading filter based on style preset.
+    
+    Styles:
+    - viral: High contrast, saturated, punchy
+    - cinematic: Teal and orange, film look
+    - clean: Subtle enhancement
+    - moody: Darker, desaturated
+    """
+    presets = {
+        "viral": "eq=contrast=1.2:brightness=0.02:saturation=1.3:gamma=1.05,curves=preset=lighter",
+        "cinematic": "colorbalance=rs=0.1:gs=-0.05:bs=-0.1:rm=0.05:gm=0:bm=0.05,eq=contrast=1.15:saturation=1.1",
+        "clean": "eq=contrast=1.05:brightness=0.01:saturation=1.1",
+        "moody": "eq=contrast=1.1:brightness=-0.02:saturation=0.9:gamma=0.95,colorbalance=rs=-0.05:gs=-0.05:bs=0.05",
+    }
+    return presets.get(style, presets["viral"])
 
 
 def add_background_music(
@@ -602,6 +678,166 @@ def add_background_music(
 # ============================================================================
 # Main AI Editor Pipeline
 # ============================================================================
+
+# ============================================================================
+# AI-Powered Clip Stitching - Combine Related Moments
+# ============================================================================
+
+@dataclass
+class ClipSegment:
+    """A segment of video to include in a stitched clip."""
+    start_time: float
+    end_time: float
+    text: str
+    purpose: str  # 'hook', 'context', 'punchline', 'payoff'
+    
+
+def find_related_moments_with_ai(
+    transcript_words: List[dict],
+    topic: str,
+    max_segments: int = 3,
+    min_segment_duration: float = 5.0,
+    max_total_duration: float = 60.0,
+) -> List[ClipSegment]:
+    """
+    Use AI to find related moments throughout a video that can be stitched together.
+    For example: setup in minute 1, punchline in minute 5, callback in minute 8.
+    """
+    client = get_openai_client()
+    if not client:
+        return []
+    
+    # Build full transcript with timestamps
+    full_text = ""
+    for w in transcript_words:
+        full_text += f"[{w.get('start', 0):.1f}s] {w.get('word', '')} "
+    
+    prompt = f"""Analyze this video transcript and find RELATED moments that could be stitched together into one viral clip about "{topic}".
+
+TRANSCRIPT:
+{full_text[:8000]}  # Limit to avoid token limits
+
+TASK: Find up to {max_segments} segments that together tell a complete, engaging story:
+1. HOOK - The attention-grabbing opening (should come first in final clip)
+2. CONTEXT/SETUP - Any necessary background or buildup
+3. PAYOFF/PUNCHLINE - The satisfying conclusion or funny moment
+
+These segments might be from DIFFERENT parts of the video but relate to the same topic/joke/story.
+
+RULES:
+- Each segment should be at least {min_segment_duration}s long
+- Total combined duration should be under {max_total_duration}s
+- Segments should flow naturally when combined
+- Prioritize entertainment value and virality
+
+Return ONLY valid JSON:
+{{
+  "segments": [
+    {{
+      "start_time": 12.5,
+      "end_time": 18.2,
+      "text": "exact quote",
+      "purpose": "hook"
+    }},
+    {{
+      "start_time": 145.0,
+      "end_time": 158.3,
+      "text": "exact quote",
+      "purpose": "payoff"
+    }}
+  ],
+  "stitch_reasoning": "Why these segments work together"
+}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a viral video editor. Find related moments that can be stitched into one engaging clip. Return only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000,
+        )
+        
+        content = response.choices[0].message.content.strip()
+        if content.startswith("```"):
+            content = re.sub(r'^```json?\n?', '', content)
+            content = re.sub(r'\n?```$', '', content)
+        
+        result = json.loads(content)
+        
+        segments = []
+        for seg in result.get("segments", []):
+            segments.append(ClipSegment(
+                start_time=float(seg.get("start_time", 0)),
+                end_time=float(seg.get("end_time", 0)),
+                text=seg.get("text", ""),
+                purpose=seg.get("purpose", "content"),
+            ))
+        
+        logger.info(f"AI found {len(segments)} related segments to stitch: {result.get('stitch_reasoning', '')}")
+        return segments
+        
+    except Exception as e:
+        logger.warning(f"AI clip stitching failed: {e}")
+        return []
+
+
+def generate_hook_header(text: str, duration: float = 3.5) -> str:
+    """
+    Use AI to generate a compelling hook header for the first 3-4 seconds.
+    Returns the header text to display at the top of the video.
+    """
+    client = get_openai_client()
+    if not client:
+        # Fallback: use first few words
+        words = text.split()[:5]
+        return " ".join(words).upper() + "..."
+    
+    prompt = f"""Create a SHORT, punchy hook header for this video clip (to show at the top in first 3 seconds).
+
+CLIP CONTENT: "{text[:500]}"
+
+REQUIREMENTS:
+- Maximum 4-6 words
+- ALL CAPS
+- Creates curiosity/intrigue
+- Makes viewer want to watch
+- No emojis
+
+Good examples:
+- "THE TRUTH ABOUT..."
+- "NOBODY TALKS ABOUT THIS"
+- "WAIT FOR IT..."
+- "THIS CHANGED EVERYTHING"
+
+Return ONLY the header text, nothing else."""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You create viral video hooks. Be punchy and intriguing."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=50,
+        )
+        
+        header = response.choices[0].message.content.strip()
+        # Clean up
+        header = header.replace('"', '').replace("'", "").strip()
+        # Ensure it's not too long
+        if len(header) > 40:
+            header = " ".join(header.split()[:5])
+        
+        return header.upper()
+        
+    except Exception as e:
+        logger.warning(f"AI header generation failed: {e}")
+        return text.split()[0].upper() + "..." if text else "WATCH THIS"
+
 
 def optimize_clip_with_ai(
     words: List[dict],

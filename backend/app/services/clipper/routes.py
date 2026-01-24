@@ -1271,16 +1271,21 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
 _job_logs: Dict[str, List[dict]] = {}
 
 
-def add_job_log(job_id: str, message: str, level: str = "info"):
-    """Add a log entry for a job."""
+def add_job_log(job_id: str, message: str, level: str = "info", eta: str = None):
+    """Add a log entry for a job with optional ETA."""
     if job_id not in _job_logs:
         _job_logs[job_id] = []
-    _job_logs[job_id].append({
+    
+    log_entry = {
         "time": datetime.now().isoformat(),
         "level": level,
         "message": message,
-    })
-    logger.info(f"[{job_id}] {message}")
+    }
+    if eta:
+        log_entry["eta"] = eta
+    
+    _job_logs[job_id].append(log_entry)
+    logger.info(f"[{job_id}] {message}" + (f" (ETA: {eta})" if eta else ""))
 
 
 @router.get("/job/{job_id}/logs")
@@ -1443,7 +1448,7 @@ def run_full_railway_processing(
                 update_job_progress(job_id, "failed", 0, "yt-dlp missing", "yt-dlp package not installed")
                 return
             
-            add_job_log(job_id, f"Downloading from YouTube: {youtube_url}")
+            add_job_log(job_id, f"📥 Downloading from YouTube: {youtube_url}", eta="~1-3 min")
             update_job_progress(job_id, "processing", 0.05, "Downloading", "Fetching video from YouTube...")
             
             def progress_hook(d):
@@ -1488,26 +1493,29 @@ def run_full_railway_processing(
         update_job_progress(job_id, "processing", 0.20, "Download complete", "Starting transcription...")
         
         # Step 2: Transcribe
+        import time as time_module
         if not transcript_path.exists():
-            add_job_log(job_id, f"Transcribing with Whisper ({whisper_model})...")
+            add_job_log(job_id, f"🎤 Transcribing with Whisper ({whisper_model})...", eta="~2-5 min depending on video length")
             update_job_progress(job_id, "processing", 0.25, "Transcribing", f"Using {whisper_model} model...")
             
+            transcribe_start = time_module.time()
             transcript_result = transcribe_video(str(input_path), model_size=whisper_model)
             transcript = transcript_result.to_dict()
+            transcribe_time = time_module.time() - transcribe_start
             
             with open(transcript_path, "w") as f:
                 json.dump(transcript, f, indent=2)
             
-            add_job_log(job_id, f"✓ Transcription complete ({len(transcript.get('segments', []))} segments)", "success")
+            add_job_log(job_id, f"✓ Transcription complete in {transcribe_time:.1f}s ({len(transcript.get('segments', []))} segments)", "success")
         else:
             with open(transcript_path) as f:
                 transcript = json.load(f)
-            add_job_log(job_id, "Using cached transcript")
+            add_job_log(job_id, "⚡ Using cached transcript (skipped transcription)", "success")
         
         update_job_progress(job_id, "processing", 0.45, "Transcription complete", "Analyzing for viral moments...")
         
-        # Step 3: Analyze for viral moments
-        add_job_log(job_id, "Analyzing transcript for viral moments...")
+        # Step 3: Analyze for viral moments with AI
+        add_job_log(job_id, "🧠 AI analyzing transcript for viral moments...", eta="~30s")
         
         words = []
         for segment in transcript.get("segments", []):
@@ -1535,13 +1543,18 @@ def run_full_railway_processing(
             })
         
         _viral_candidates[job_id] = candidates
-        add_job_log(job_id, f"✓ Found {len(candidates)} viral moments", "success")
+        add_job_log(job_id, f"✓ AI found {len(candidates)} viral moments with hooks", "success")
+        
+        # Log top candidates
+        for i, c in enumerate(candidates[:3]):
+            add_job_log(job_id, f"  #{i+1} Score {c['virality_score']}: {c['text'][:50]}...")
         
         # Save candidates
         with open(job_dir / "viral_candidates.json", "w") as f:
             json.dump(candidates, f, indent=2)
         
-        update_job_progress(job_id, "processing", 0.50, "Analysis complete", f"Rendering top {num_clips} clips...")
+        update_job_progress(job_id, "processing", 0.50, "Analysis complete", f"AI editing top {num_clips} clips...")
+        add_job_log(job_id, f"🎬 Starting AI video editing for {num_clips} clips...", eta=f"~{num_clips * 30}s")
         
         # Step 4: AI-Powered Rendering with Dynamic Captions
         selected = [c for c in candidates if c.get("selected")][:num_clips]
@@ -1563,12 +1576,18 @@ def run_full_railway_processing(
                 return
             
             progress = 0.50 + (i / len(selected)) * 0.45
+            remaining_clips = len(selected) - i
             update_job_progress(
                 job_id, "processing", progress,
                 f"🎬 AI editing clip {i+1}/{len(selected)}",
                 f"Score: {clip['virality_score']} - {clip['category']}"
             )
-            add_job_log(job_id, f"AI editing clip {i+1}/{len(selected)} with dynamic captions...")
+            add_job_log(
+                job_id, 
+                f"🎬 Clip {i+1}/{len(selected)}: {clip['text'][:40]}...",
+                eta=f"~{remaining_clips * 25}s remaining"
+            )
+            add_job_log(job_id, f"   → Adding centered captions + hook header + scene changes")
             
             clip_name = f"clip_{i+1:02d}"
             clip_path = clips_dir / f"{clip_name}.mp4"
