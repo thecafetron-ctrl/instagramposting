@@ -84,6 +84,101 @@ class ClipperPipeline:
             self.progress_callback(stage, progress)
         logger.info(f"[{progress*100:.0f}%] {stage}")
     
+    def _run_simple_mode(
+        self,
+        video_path: Path,
+        output_dir: Path,
+        clips_dir: Path,
+        start_time: datetime,
+    ) -> PipelineResult:
+        """
+        Simple mode: Create clips without transcription (low memory).
+        Splits video into equal segments based on config settings.
+        """
+        from .crop import get_video_info
+        
+        self._update_progress("Simple mode (no captions)", 0.05)
+        
+        # Get video duration
+        video_info = get_video_info(str(video_path))
+        total_duration = video_info.get('duration', 0)
+        
+        if total_duration <= 0:
+            raise ValueError("Could not determine video duration")
+        
+        self._update_progress("Calculating clip segments", 0.10)
+        
+        # Calculate clip positions (evenly distributed)
+        clip_duration = (self.config.min_duration + self.config.max_duration) / 2
+        num_clips = min(self.config.num_clips, int(total_duration / clip_duration))
+        
+        if num_clips <= 0:
+            num_clips = 1
+            clip_duration = min(total_duration, self.config.max_duration)
+        
+        # Space clips evenly through the video
+        if num_clips == 1:
+            clip_starts = [0]
+        else:
+            spacing = (total_duration - clip_duration) / (num_clips - 1)
+            clip_starts = [i * spacing for i in range(num_clips)]
+        
+        self._update_progress("Rendering clips (no captions)", 0.20)
+        
+        clip_results = []
+        for i, clip_start in enumerate(clip_starts):
+            progress = 0.20 + (0.75 * (i / len(clip_starts)))
+            self._update_progress(f"Rendering clip {i+1}/{len(clip_starts)}", progress)
+            
+            clip_end = min(clip_start + clip_duration, total_duration)
+            clip_name = f"clip_{i+1:02d}"
+            clip_video_path = clips_dir / f"{clip_name}.{self.config.output_format}"
+            
+            render_final_clip(
+                video_path,
+                clip_video_path,
+                clip_start,
+                clip_end,
+                ass_path=None,  # No captions
+                crop_vertical=self.config.crop_vertical,
+                auto_center=self.config.auto_center,
+            )
+            
+            thumbnail_path = None
+            if self.config.create_thumbnails:
+                thumbnail_path = clips_dir / f"{clip_name}_thumb.jpg"
+                try:
+                    create_thumbnail(clip_video_path, thumbnail_path)
+                except Exception as e:
+                    logger.warning(f"Thumbnail creation failed: {e}")
+                    thumbnail_path = None
+            
+            clip_results.append(ClipResult(
+                index=i + 1,
+                video_path=str(clip_video_path),
+                thumbnail_path=str(thumbnail_path) if thumbnail_path else None,
+                start_time=clip_start,
+                end_time=clip_end,
+                duration=clip_end - clip_start,
+                score=1.0 - (i / len(clip_starts)),  # Score by position
+                text=f"Clip from {clip_start:.1f}s to {clip_end:.1f}s (no transcription)",
+            ))
+        
+        self._update_progress("Complete", 1.0)
+        
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        return PipelineResult(
+            success=True,
+            source_video=str(video_path),
+            output_dir=str(output_dir),
+            transcript_json="",
+            transcript_srt="",
+            clips=clip_results,
+            total_duration=total_duration,
+            processing_time=processing_time,
+        )
+    
     def run(
         self,
         video_path: str | Path,
@@ -103,6 +198,10 @@ class ClipperPipeline:
         clips_dir.mkdir(exist_ok=True)
         
         try:
+            # If captions disabled, use simple mode (no transcription = low memory)
+            if not self.config.burn_captions:
+                return self._run_simple_mode(video_path, output_dir, clips_dir, start_time)
+            
             self._update_progress("Transcribing video", 0.0)
             
             if transcript_path and Path(transcript_path).exists():

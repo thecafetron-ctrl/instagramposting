@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 
 const API_BASE = '/api'
@@ -1431,53 +1431,59 @@ function VideoClipperPage() {
   }
 
   const [pollErrorCount, setPollErrorCount] = useState(0)
+  const pollErrorCountRef = useRef(0)
 
   const startPolling = (jobId) => {
     if (pollInterval) clearInterval(pollInterval)
     setPollErrorCount(0)
+    pollErrorCountRef.current = 0
     
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/clipper/job/${jobId}`)
         
-        // Handle server errors
-        if (res.status === 502 || res.status === 503) {
-          setPollErrorCount(prev => {
-            const newCount = prev + 1
-            if (newCount >= 5) {
-              clearInterval(interval)
-              setPollInterval(null)
-              setCurrentJob(prev => ({
-                ...prev,
-                status: 'failed',
-                stage: 'Server Error',
-                error: 'Server crashed or ran out of memory. Try using "Tiny" Whisper model for lower memory usage, or use a shorter video.'
-              }))
-            }
-            return newCount
-          })
+        // Handle server errors (crash/OOM)
+        if (res.status === 502 || res.status === 503 || res.status === 500) {
+          pollErrorCountRef.current += 1
+          console.log(`Server error ${res.status}, count: ${pollErrorCountRef.current}`)
+          
+          if (pollErrorCountRef.current >= 3) {
+            clearInterval(interval)
+            setPollInterval(null)
+            setCurrentJob({
+              id: jobId,
+              status: 'failed',
+              progress: 0,
+              stage: 'Server Crashed',
+              detail: 'Out of memory',
+              error: '⚠️ Server ran out of memory while loading Whisper model. Railway free tier has limited RAM (~512MB). Try: 1) Disable "Burn captions" to skip transcription, or 2) Use a local setup instead.'
+            })
+          }
           return
         }
         
+        // Handle job not found (server restarted)
         if (res.status === 404) {
-          setPollErrorCount(prev => {
-            const newCount = prev + 1
-            if (newCount >= 3) {
-              clearInterval(interval)
-              setPollInterval(null)
-              setCurrentJob(prev => ({
-                ...prev,
-                status: 'failed',
-                stage: 'Job Lost',
-                error: 'Job was lost (server may have restarted). Please try again with "Tiny" Whisper model to reduce memory usage.'
-              }))
-            }
-            return newCount
-          })
+          pollErrorCountRef.current += 1
+          console.log(`Job not found, count: ${pollErrorCountRef.current}`)
+          
+          if (pollErrorCountRef.current >= 2) {
+            clearInterval(interval)
+            setPollInterval(null)
+            setCurrentJob({
+              id: jobId,
+              status: 'failed',
+              progress: 0,
+              stage: 'Job Lost',
+              detail: 'Server restarted',
+              error: '⚠️ Job was lost because the server restarted (likely crashed from low memory). Disable "Burn captions" to skip the memory-heavy transcription step.'
+            })
+          }
           return
         }
         
-        setPollErrorCount(0) // Reset on success
+        // Success - reset error count
+        pollErrorCountRef.current = 0
         const data = await res.json()
         
         setCurrentJob({
@@ -1498,10 +1504,23 @@ function VideoClipperPage() {
           setPollInterval(null)
         }
       } catch (err) {
-        console.error('Polling failed:', err)
-        setPollErrorCount(prev => prev + 1)
+        console.error('Polling network error:', err)
+        pollErrorCountRef.current += 1
+        
+        if (pollErrorCountRef.current >= 5) {
+          clearInterval(interval)
+          setPollInterval(null)
+          setCurrentJob({
+            id: jobId,
+            status: 'failed',
+            progress: 0,
+            stage: 'Connection Lost',
+            detail: 'Network error',
+            error: 'Lost connection to server. The server may have crashed or restarted. Please try again.'
+          })
+        }
       }
-    }, 1500) // Poll every 1.5 seconds
+    }, 2000) // Poll every 2 seconds
     
     setPollInterval(interval)
   }
@@ -1646,6 +1665,7 @@ function VideoClipperPage() {
               onChange={(e) => setBurnCaptions(e.target.checked)}
             />
             <span>Burn captions into video</span>
+            {!burnCaptions && <span className="option-badge success">Low memory ✓</span>}
           </label>
           <label className="checkbox-label">
             <input 
@@ -1664,6 +1684,11 @@ function VideoClipperPage() {
             <span>Auto-center on motion</span>
           </label>
         </div>
+        {burnCaptions && (
+          <p className="memory-warning">
+            ⚠️ Captions require loading Whisper AI model (~1GB RAM). If you're on Railway free tier, this may crash. Disable captions to skip transcription.
+          </p>
+        )}
       </div>
 
       {/* Input Section */}
