@@ -55,11 +55,25 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
+# Debug endpoint to verify API is working
+@app.get("/api/debug")
+def debug():
+    return {
+        "status": "ok",
+        "routes_count": len(app.routes),
+        "api_routes": [r.path for r in app.routes if hasattr(r, 'path') and r.path.startswith('/api')]
+    }
+
 # Import and include API routes
 try:
     from app.routes import router
     app.include_router(router, prefix="/api")
     print("✓ API routes loaded")
+    
+    # Log all routes for debugging
+    for route in app.routes:
+        if hasattr(route, 'path'):
+            print(f"  Route: {route.path}")
 except Exception as e:
     print(f"✗ Failed to load routes: {e}")
     import traceback
