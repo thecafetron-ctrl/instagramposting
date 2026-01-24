@@ -42,6 +42,13 @@ from app.services.news_renderer import render_news_post
 from app.config import get_settings
 
 router = APIRouter()
+
+# Include clipper routes
+try:
+    from app.services.clipper.routes import router as clipper_router
+    router.include_router(clipper_router)
+except ImportError as e:
+    print(f"Clipper routes not available: {e}")
 settings = get_settings()
 
 

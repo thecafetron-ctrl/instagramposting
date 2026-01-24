@@ -496,6 +496,12 @@ function App() {
             >
               Settings
             </button>
+            <button
+              className={`nav-btn ${currentPage === 'clipper' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('clipper')}
+            >
+              🎬 Clipper
+            </button>
           </nav>
         </div>
       </header>
@@ -1228,6 +1234,10 @@ function App() {
             </div>
           </section>
         )}
+
+        {currentPage === 'clipper' && (
+          <VideoClipperPage />
+        )}
       </main>
 
       <footer className="footer">
@@ -1265,6 +1275,351 @@ function SlideCard({ number, text, image, onCopy }) {
         )}
       </div>
     </div>
+  )
+}
+
+function VideoClipperPage() {
+  const [clipperStatus, setClipperStatus] = useState(null)
+  const [captionStyles, setCaptionStyles] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [currentJob, setCurrentJob] = useState(null)
+  const [jobResult, setJobResult] = useState(null)
+  const [pollInterval, setPollInterval] = useState(null)
+  
+  // Settings
+  const [numClips, setNumClips] = useState(10)
+  const [minDuration, setMinDuration] = useState(20)
+  const [maxDuration, setMaxDuration] = useState(60)
+  const [pauseThreshold, setPauseThreshold] = useState(0.7)
+  const [captionStyle, setCaptionStyle] = useState('default')
+  const [whisperModel, setWhisperModel] = useState('base')
+  const [burnCaptions, setBurnCaptions] = useState(true)
+  const [cropVertical, setCropVertical] = useState(true)
+  const [autoCenter, setAutoCenter] = useState(true)
+
+  useEffect(() => {
+    checkClipperStatus()
+    fetchCaptionStyles()
+    return () => {
+      if (pollInterval) clearInterval(pollInterval)
+    }
+  }, [])
+
+  const checkClipperStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/clipper/status`)
+      const data = await res.json()
+      setClipperStatus(data)
+    } catch (err) {
+      console.error('Failed to check clipper status:', err)
+      setClipperStatus({ status: 'error', dependencies: [] })
+    }
+  }
+
+  const fetchCaptionStyles = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/clipper/styles`)
+      const data = await res.json()
+      setCaptionStyles(data)
+    } catch (err) {
+      console.error('Failed to fetch caption styles:', err)
+    }
+  }
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    setJobResult(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('num_clips', numClips)
+    formData.append('min_duration', minDuration)
+    formData.append('max_duration', maxDuration)
+    formData.append('pause_threshold', pauseThreshold)
+    formData.append('caption_style', captionStyle)
+    formData.append('whisper_model', whisperModel)
+    formData.append('burn_captions', burnCaptions)
+    formData.append('crop_vertical', cropVertical)
+    formData.append('auto_center', autoCenter)
+
+    try {
+      const res = await fetch(`${API_BASE}/clipper/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      
+      if (data.job_id) {
+        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: 'Starting' })
+        startPolling(data.job_id)
+      } else {
+        alert('Upload failed: ' + (data.detail || 'Unknown error'))
+      }
+    } catch (err) {
+      console.error('Upload failed:', err)
+      alert('Upload failed: ' + err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const startPolling = (jobId) => {
+    if (pollInterval) clearInterval(pollInterval)
+    
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/clipper/job/${jobId}`)
+        const data = await res.json()
+        
+        setCurrentJob({
+          id: jobId,
+          status: data.status,
+          progress: data.progress,
+          stage: data.stage,
+          error: data.error,
+        })
+        
+        if (data.status === 'completed') {
+          clearInterval(interval)
+          setPollInterval(null)
+          fetchJobResult(jobId)
+        } else if (data.status === 'failed') {
+          clearInterval(interval)
+          setPollInterval(null)
+        }
+      } catch (err) {
+        console.error('Polling failed:', err)
+      }
+    }, 2000)
+    
+    setPollInterval(interval)
+  }
+
+  const fetchJobResult = async (jobId) => {
+    try {
+      const res = await fetch(`${API_BASE}/clipper/job/${jobId}/result`)
+      const data = await res.json()
+      setJobResult(data)
+    } catch (err) {
+      console.error('Failed to fetch result:', err)
+    }
+  }
+
+  const isReady = clipperStatus?.status === 'ready'
+
+  return (
+    <section className="clipper-section animate-fade-in">
+      <h2 className="section-title">🎬 Video Clipper</h2>
+      <p className="section-subtitle">Transform long videos into viral short clips with AI captions</p>
+
+      {/* Status Check */}
+      {clipperStatus && clipperStatus.status !== 'ready' && (
+        <div className="clipper-warning">
+          <h3>⚠️ Missing Dependencies</h3>
+          <p>Some required tools are not installed:</p>
+          <ul>
+            {clipperStatus.dependencies?.filter(d => d.status !== 'installed').map((dep, i) => (
+              <li key={i}>
+                <strong>{dep.name}</strong>
+                {dep.instructions && <pre>{dep.instructions}</pre>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Settings Panel */}
+      <div className="clipper-card">
+        <h3>⚙️ Clip Settings</h3>
+        
+        <div className="clipper-settings-grid">
+          <div className="setting-group">
+            <label>Number of Clips</label>
+            <input 
+              type="number" 
+              min="1" 
+              max="20" 
+              value={numClips}
+              onChange={(e) => setNumClips(parseInt(e.target.value) || 10)}
+            />
+          </div>
+          
+          <div className="setting-group">
+            <label>Min Duration (sec)</label>
+            <input 
+              type="number" 
+              min="5" 
+              max="120" 
+              value={minDuration}
+              onChange={(e) => setMinDuration(parseFloat(e.target.value) || 20)}
+            />
+          </div>
+          
+          <div className="setting-group">
+            <label>Max Duration (sec)</label>
+            <input 
+              type="number" 
+              min="10" 
+              max="180" 
+              value={maxDuration}
+              onChange={(e) => setMaxDuration(parseFloat(e.target.value) || 60)}
+            />
+          </div>
+          
+          <div className="setting-group">
+            <label>Pause Threshold (sec)</label>
+            <input 
+              type="number" 
+              min="0.3" 
+              max="2" 
+              step="0.1"
+              value={pauseThreshold}
+              onChange={(e) => setPauseThreshold(parseFloat(e.target.value) || 0.7)}
+            />
+          </div>
+          
+          <div className="setting-group">
+            <label>Caption Style</label>
+            <select value={captionStyle} onChange={(e) => setCaptionStyle(e.target.value)}>
+              {captionStyles.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="setting-group">
+            <label>Whisper Model</label>
+            <select value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)}>
+              <option value="tiny">Tiny (fastest)</option>
+              <option value="base">Base (recommended)</option>
+              <option value="small">Small</option>
+              <option value="medium">Medium</option>
+              <option value="large-v2">Large (best quality)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="clipper-options">
+          <label className="checkbox-label">
+            <input 
+              type="checkbox" 
+              checked={burnCaptions}
+              onChange={(e) => setBurnCaptions(e.target.checked)}
+            />
+            <span>Burn captions into video</span>
+          </label>
+          <label className="checkbox-label">
+            <input 
+              type="checkbox" 
+              checked={cropVertical}
+              onChange={(e) => setCropVertical(e.target.checked)}
+            />
+            <span>Crop to vertical (9:16)</span>
+          </label>
+          <label className="checkbox-label">
+            <input 
+              type="checkbox" 
+              checked={autoCenter}
+              onChange={(e) => setAutoCenter(e.target.checked)}
+            />
+            <span>Auto-center on motion</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Upload Section */}
+      <div className="clipper-card upload-card">
+        <h3>📤 Upload Video</h3>
+        <p>Supported formats: MP4, MOV, AVI, MKV, WebM</p>
+        
+        <label className="upload-zone">
+          <input 
+            type="file" 
+            accept="video/*"
+            onChange={handleUpload}
+            disabled={uploading || !isReady}
+          />
+          <div className="upload-content">
+            <span className="upload-icon">🎥</span>
+            <span className="upload-text">
+              {uploading ? 'Uploading...' : 'Click or drag to upload video'}
+            </span>
+          </div>
+        </label>
+      </div>
+
+      {/* Progress */}
+      {currentJob && currentJob.status === 'processing' && (
+        <div className="clipper-card progress-card">
+          <h3>🔄 Processing</h3>
+          <div className="progress-bar-container">
+            <div 
+              className="progress-bar-fill"
+              style={{ width: `${currentJob.progress * 100}%` }}
+            />
+          </div>
+          <p className="progress-text">
+            {Math.round(currentJob.progress * 100)}% - {currentJob.stage}
+          </p>
+        </div>
+      )}
+
+      {/* Error */}
+      {currentJob && currentJob.status === 'failed' && (
+        <div className="clipper-card error-card">
+          <h3>❌ Processing Failed</h3>
+          <p>{currentJob.error || 'Unknown error occurred'}</p>
+        </div>
+      )}
+
+      {/* Results */}
+      {jobResult && jobResult.success && (
+        <div className="clipper-card results-card">
+          <h3>✅ Clips Ready!</h3>
+          <div className="results-summary">
+            <span>Generated {jobResult.clips.length} clips</span>
+            <span>•</span>
+            <span>Processing time: {jobResult.processing_time.toFixed(1)}s</span>
+          </div>
+
+          <div className="clips-grid">
+            {jobResult.clips.map((clip, idx) => (
+              <div key={idx} className="clip-card">
+                <div className="clip-preview">
+                  <video 
+                    src={clip.video_url} 
+                    controls 
+                    preload="metadata"
+                  />
+                </div>
+                <div className="clip-info">
+                  <div className="clip-header">
+                    <span className="clip-number">Clip {clip.index}</span>
+                    <span className="clip-score">Score: {clip.score.toFixed(2)}</span>
+                  </div>
+                  <div className="clip-meta">
+                    <span>{clip.duration.toFixed(1)}s</span>
+                    <span>•</span>
+                    <span>{clip.start_time.toFixed(1)}s - {clip.end_time.toFixed(1)}s</span>
+                  </div>
+                  <p className="clip-text">{clip.text.slice(0, 100)}...</p>
+                  <a 
+                    href={clip.video_url} 
+                    download={`clip_${clip.index}.mp4`}
+                    className="btn btn-primary btn-sm"
+                  >
+                    📥 Download
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
