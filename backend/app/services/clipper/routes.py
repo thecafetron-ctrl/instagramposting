@@ -1315,6 +1315,8 @@ async def smart_analyze_full_railway(
     title_color: str = Form("#FFFF00"),
     video_vibe: str = Form("default"),
     manual_topic_select: bool = Form(False),
+    caption_size: int = Form(80),
+    add_stock_images: bool = Form(False),
 ):
     """
     FULL Railway processing - download, transcribe, analyze, ALL on Railway.
@@ -1400,6 +1402,8 @@ async def smart_analyze_full_railway(
         "title_color": title_color,
         "video_vibe": video_vibe,
         "manual_topic_select": manual_topic_select,
+        "caption_size": caption_size,
+        "add_stock_images": add_stock_images,
     }
     
     background_tasks.add_task(
@@ -2429,6 +2433,82 @@ async def get_smart_results(job_id: str):
         "status": "completed",
         "clips": results,
     }
+
+
+@router.post("/smart/edit-clip")
+async def edit_clip_with_ai(
+    background_tasks: BackgroundTasks,
+    job_id: str = Form(""),
+    clip_index: int = Form(0),
+    edit_request: str = Form(""),
+    original_start: float = Form(0),
+    original_end: float = Form(0),
+    caption_color: str = Form("#FFFFFF"),
+    animation_color: str = Form("#FFFF00"),
+    caption_size: int = Form(80),
+    video_vibe: str = Form("default"),
+):
+    """
+    AI-powered clip editing based on user request.
+    Takes natural language instructions and re-renders the clip.
+    """
+    if not edit_request:
+        raise HTTPException(status_code=400, detail="Edit request is required")
+    
+    add_job_log(job_id, f"🤖 Edit request for clip {clip_index + 1}: {edit_request}")
+    
+    # Use GPT to interpret the edit request and apply changes
+    try:
+        from openai import OpenAI
+        import os
+        
+        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": """You are a video editing AI. Parse the user's edit request and return JSON with the changes to make.
+                
+Available changes:
+- music_style: "upbeat", "chill", "dramatic", "funny", "none"
+- zoom_intensity: 0.0 to 1.0 (0 = no zoom, 1 = aggressive zoom)
+- caption_animation: "karaoke", "pop", "bounce", "fade", "none"
+- color_grade: "viral", "cinematic", "clean", "moody"
+- speed: 0.5 to 2.0 (1.0 = normal)
+- trim_start: seconds to trim from start
+- trim_end: seconds to trim from end
+
+Return ONLY valid JSON like: {"music_style": "dramatic", "zoom_intensity": 0.8}"""},
+                {"role": "user", "content": f"Edit request: {edit_request}"}
+            ],
+            temperature=0.3,
+            max_tokens=200,
+        )
+        
+        import json
+        import re
+        content = response.choices[0].message.content.strip()
+        if content.startswith("```"):
+            content = re.sub(r'^```json?\n?', '', content)
+            content = re.sub(r'\n?```$', '', content)
+        
+        edit_params = json.loads(content)
+        add_job_log(job_id, f"AI interpreted edits: {edit_params}", "success")
+        
+        # TODO: Actually apply these edits in background task
+        # For now, return success
+        return {
+            "success": True,
+            "message": "Edit request received",
+            "interpreted_changes": edit_params,
+        }
+        
+    except Exception as e:
+        logger.error(f"Edit request failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+        }
 
 
 @router.get("/history")

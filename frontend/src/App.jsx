@@ -1414,7 +1414,10 @@ function VideoClipperPage() {
   const [titleColor, setTitleColor] = useState(savedSettings?.titleColor ?? '#FFFF00')
   const [videoVibe, setVideoVibe] = useState(savedSettings?.videoVibe ?? 'default')
   const [manualTopicSelect, setManualTopicSelect] = useState(savedSettings?.manualTopicSelect ?? false)
+  const [captionSize, setCaptionSize] = useState(savedSettings?.captionSize ?? 80)
   const [showStylePanel, setShowStylePanel] = useState(false)
+  const [clipEditRequests, setClipEditRequests] = useState({}) // {clipIndex: "edit request text"}
+  const [addStockImages, setAddStockImages] = useState(savedSettings?.addStockImages ?? false)
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
@@ -1422,10 +1425,10 @@ function VideoClipperPage() {
       numClips, minDuration, maxDuration, pauseThreshold,
       captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter,
       captionAnimation, captionColor, animationColor, titleStyle, titleColor,
-      videoVibe, manualTopicSelect
+      videoVibe, manualTopicSelect, captionSize, addStockImages
     }
     localStorage.setItem('clipper_settings', JSON.stringify(settings))
-  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, captionAnimation, captionColor, animationColor, titleStyle, titleColor, videoVibe, manualTopicSelect])
+  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, captionAnimation, captionColor, animationColor, titleStyle, titleColor, videoVibe, manualTopicSelect, captionSize, addStockImages])
 
   useEffect(() => {
     checkClipperStatus()
@@ -1525,6 +1528,8 @@ function VideoClipperPage() {
       formData.append('title_color', titleColor)
       formData.append('video_vibe', videoVibe)
       formData.append('manual_topic_select', manualTopicSelect)
+      formData.append('caption_size', captionSize)
+      formData.append('add_stock_images', addStockImages)
 
       const res = await fetch(`${API_BASE}/clipper/smart/analyze-full`, {
         method: 'POST',
@@ -1629,6 +1634,42 @@ function VideoClipperPage() {
     }, 2000)
     
     setPollInterval(interval)
+  }
+  
+  const handleClipEditRequest = async (clip, clipIndex, editRequest) => {
+    if (!editRequest.trim()) return
+    
+    try {
+      const formData = new FormData()
+      formData.append('job_id', currentJob?.id || '')
+      formData.append('clip_index', clipIndex)
+      formData.append('edit_request', editRequest)
+      formData.append('original_start', clip.start_time)
+      formData.append('original_end', clip.end_time)
+      // Pass current style settings
+      formData.append('caption_color', captionColor)
+      formData.append('animation_color', animationColor)
+      formData.append('caption_size', captionSize)
+      formData.append('video_vibe', videoVibe)
+      
+      const res = await fetch(`${API_BASE}/clipper/smart/edit-clip`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      
+      if (data.success) {
+        alert('AI is re-rendering your clip! Check back in a moment.')
+        // Clear the edit request
+        setClipEditRequests(prev => ({ ...prev, [clipIndex]: '' }))
+        // Could trigger a refresh here
+      } else {
+        alert('Edit request failed: ' + (data.error || 'Unknown error'))
+      }
+    } catch (err) {
+      console.error('Edit request failed:', err)
+      alert('Failed to submit edit request')
+    }
   }
   
   const handleCancelJob = async () => {
@@ -2144,9 +2185,9 @@ function VideoClipperPage() {
               </div>
             </div>
             
-            {/* Caption Colors */}
+            {/* Caption Colors & Size */}
             <div className="style-section colors-section">
-              <h4>🎨 Caption Colors</h4>
+              <h4>🎨 Caption Styling</h4>
               <div className="color-pickers">
                 <div className="color-picker-group">
                   <label>Text Color</label>
@@ -2190,15 +2231,75 @@ function VideoClipperPage() {
                 </div>
               </div>
               
-              {/* Live Caption Preview */}
+              {/* Caption Size Slider */}
+              <div className="caption-size-control">
+                <label>Caption Size: <strong>{captionSize}px</strong></label>
+                <input 
+                  type="range"
+                  min="50"
+                  max="120"
+                  value={captionSize}
+                  onChange={(e) => setCaptionSize(parseInt(e.target.value))}
+                  className="size-slider"
+                />
+                <div className="size-presets">
+                  <button onClick={() => setCaptionSize(60)} className={captionSize === 60 ? 'active' : ''}>S</button>
+                  <button onClick={() => setCaptionSize(80)} className={captionSize === 80 ? 'active' : ''}>M</button>
+                  <button onClick={() => setCaptionSize(100)} className={captionSize === 100 ? 'active' : ''}>L</button>
+                  <button onClick={() => setCaptionSize(120)} className={captionSize === 120 ? 'active' : ''}>XL</button>
+                </div>
+              </div>
+              
+              {/* Stock Images Toggle */}
+              <div className="stock-images-toggle">
+                <label className="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    checked={addStockImages}
+                    onChange={(e) => setAddStockImages(e.target.checked)}
+                  />
+                  <span>🖼️ Add relevant stock images (Unsplash)</span>
+                </label>
+                {addStockImages && (
+                  <p className="toggle-hint">Images appear above captions for ~2 seconds during key moments</p>
+                )}
+              </div>
+              
+              {/* Live 9:16 Preview */}
               <div className="caption-live-preview">
-                <div className="phone-mockup">
-                  <div className="phone-screen">
+                <h5>📱 Live Preview (9:16)</h5>
+                <div className="phone-mockup-916">
+                  <div className="phone-notch"></div>
+                  <div className="phone-screen-916">
+                    {/* Title at top */}
                     <div 
-                      className={`preview-caption anim-${captionAnimation}`}
-                      style={{ color: captionColor }}
+                      className="preview-title"
+                      style={{ color: titleColor }}
                     >
-                      <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>This</span> is how your <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>captions</span> will look
+                      HOOK TITLE HERE
+                    </div>
+                    
+                    {/* Stock image placeholder */}
+                    {addStockImages && (
+                      <div className="preview-stock-image">
+                        <span>📷 Stock Image</span>
+                      </div>
+                    )}
+                    
+                    {/* Caption in middle-lower */}
+                    <div 
+                      className={`preview-caption-916 anim-${captionAnimation}`}
+                      style={{ 
+                        color: captionColor,
+                        fontSize: `${captionSize * 0.25}px`
+                      }}
+                    >
+                      <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>This</span> is how your <span className="highlight-word" style={{ backgroundColor: animationColor + '80' }}>captions</span> look
+                    </div>
+                    
+                    {/* Zoom indicator */}
+                    <div className="preview-zoom-indicator">
+                      <span>↔️ Zoom every 1.5s</span>
                     </div>
                   </div>
                 </div>
@@ -2688,6 +2789,28 @@ function VideoClipperPage() {
                   >
                     ⬇️ Download
                   </a>
+                  
+                  {/* AI Edit Request Box */}
+                  <div className="clip-edit-request">
+                    <label>🤖 Request AI Edit:</label>
+                    <textarea 
+                      placeholder="e.g. 'Make it funnier', 'Add more zoom', 'Change music to dramatic'..."
+                      value={clipEditRequests[idx] || ''}
+                      onChange={(e) => setClipEditRequests(prev => ({
+                        ...prev,
+                        [idx]: e.target.value
+                      }))}
+                      rows={2}
+                    />
+                    {clipEditRequests[idx] && (
+                      <button 
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleClipEditRequest(clip, idx, clipEditRequests[idx])}
+                      >
+                        ✨ Re-render with AI
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

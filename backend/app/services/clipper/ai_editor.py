@@ -359,12 +359,19 @@ def generate_ass_header(
     caption_color: str = "#FFFFFF",
     animation_color: str = "#FFFF00",
     title_color: str = "#FFFF00",
+    caption_size: int = 80,
 ) -> str:
-    """Generate ASS header with custom colors."""
+    """Generate ASS header with custom colors and size."""
     # Convert colors
     main_color = hex_to_ass_color(caption_color)
     highlight_color = hex_to_ass_color(animation_color)
     header_color = hex_to_ass_color(title_color)
+    
+    # Calculate scaled sizes
+    hook_size = int(caption_size * 1.125)  # 10% larger
+    peak_size = int(caption_size * 1.0625)  # 6% larger
+    emphasis_size = int(caption_size * 1.1875)  # 15% larger
+    header_size = int(caption_size * 1.375)  # 37% larger for title
     
     # ASS header with CENTERED styles (Alignment 5 = center middle)
     # MarginV of 600 puts captions slightly below center (middle-lower)
@@ -377,11 +384,11 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Montserrat ExtraBold,80,{main_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
-Style: Hook,Montserrat ExtraBold,90,{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,6,4,5,40,40,600,1
-Style: Peak,Montserrat ExtraBold,85,{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
-Style: Emphasis,Montserrat ExtraBold,95,{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,110,110,0,0,1,6,4,5,40,40,600,1
-Style: Header,Montserrat ExtraBold,110,{header_color},&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,200,1
+Style: Default,Montserrat ExtraBold,{caption_size},{main_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
+Style: Hook,Montserrat ExtraBold,{hook_size},{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,6,4,5,40,40,600,1
+Style: Peak,Montserrat ExtraBold,{peak_size},{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,5,3,5,40,40,600,1
+Style: Emphasis,Montserrat ExtraBold,{emphasis_size},{highlight_color},&H000000FF,&H00000000,&HAA000000,1,0,0,0,110,110,0,0,1,6,4,5,40,40,600,1
+Style: Header,Montserrat ExtraBold,{header_size},{header_color},&H000000FF,&H00000000,&HCC000000,1,0,0,0,100,100,0,0,1,8,5,8,40,40,200,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -399,6 +406,7 @@ def generate_enhanced_ass_subtitle(
     animation_color: str = "#FFFF00",
     title_color: str = "#FFFF00",
     caption_animation: str = "karaoke",
+    caption_size: int = 80,
 ) -> Path:
     """
     Generate ASS subtitles with dynamic effects based on content.
@@ -444,8 +452,8 @@ def generate_enhanced_ass_subtitle(
             color=color_code,
         )
     
-    # Generate header with custom colors
-    ass_content = generate_ass_header(caption_color, animation_color, title_color)
+    # Generate header with custom colors and size
+    ass_content = generate_ass_header(caption_color, animation_color, title_color, caption_size)
     
     # Group words into lines (max 6 words per line)
     lines = []
@@ -999,6 +1007,8 @@ class AIVideoEditor:
             "title_style": "bold",
             "title_color": "#FFFF00",
             "video_vibe": "default",
+            "caption_size": 80,
+            "add_stock_images": False,
         }
         
         # Default music tracks (royalty-free paths if available)
@@ -1122,6 +1132,7 @@ class AIVideoEditor:
                 animation_color=self.style_config.get("animation_color", "#FFFF00"),
                 title_color=self.style_config.get("title_color", "#FFFF00"),
                 caption_animation=self.style_config.get("caption_animation", "karaoke"),
+                caption_size=self.style_config.get("caption_size", 80),
             )
         
         # Build effects filter

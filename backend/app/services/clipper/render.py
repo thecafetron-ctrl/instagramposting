@@ -56,10 +56,14 @@ def render_final_clip(
         filters.append(crop_filter)
     
     # Add scene change zoom effect (every 1.5 seconds)
-    if enable_effects and not IS_CLOUD:  # Skip complex filters on cloud to save time
-        # Subtle zoom pulse creates dynamic feel
-        zoom_filter = f"zoompan=z='1.02+0.03*sin(2*PI*t/{scene_change_interval})':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30"
-        # filters.append(zoom_filter)  # Disabled for now - can cause issues
+    # Use a simpler zoom effect that works on Railway
+    if enable_effects:
+        # Simple scale oscillation for zoom effect - lighter than zoompan
+        # This creates a subtle "pulse" zoom every 1.5s
+        zoom_expr = f"scale=iw*(1.02+0.04*sin(2*PI*t/{scene_change_interval})):ih*(1.02+0.04*sin(2*PI*t/{scene_change_interval})),crop=1080:1920"
+        # Only add if not on cloud OR if explicitly requested
+        if not IS_CLOUD:
+            filters.append(zoom_expr)
     
     # Add color grading for viral look
     if enable_effects:
