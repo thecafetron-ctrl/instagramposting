@@ -1008,6 +1008,10 @@ function App() {
                 ))}
               </div>
             )}
+            
+            {/* Clip History */}
+            <h2 className="section-title" style={{marginTop: '2rem'}}>🎬 Clip History</h2>
+            <ClipHistorySection />
           </section>
         )}
 
@@ -1274,6 +1278,86 @@ function SlideCard({ number, text, image, onCopy }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function ClipHistorySection() {
+  const [clipHistory, setClipHistory] = useState([])
+  const [loading, setLoading] = useState(true)
+  
+  useEffect(() => {
+    fetchClipHistory()
+  }, [])
+  
+  const fetchClipHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/clipper/history`)
+      const data = await res.json()
+      setClipHistory(data.history || [])
+    } catch (err) {
+      console.error('Failed to fetch clip history:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  if (loading) return <p>Loading clip history...</p>
+  
+  if (clipHistory.length === 0) {
+    return (
+      <div className="empty-state">
+        <p>No clips generated yet. Go to the Clipper tab to create some!</p>
+      </div>
+    )
+  }
+  
+  return (
+    <div className="clip-history">
+      {clipHistory.map((job) => (
+        <div key={job.job_id} className="clip-history-job">
+          <div className="clip-history-header">
+            <span className="job-date">{new Date(job.created_at).toLocaleDateString()}</span>
+            {job.youtube_url && (
+              <a href={job.youtube_url} target="_blank" rel="noopener noreferrer" className="source-link">
+                📺 Source
+              </a>
+            )}
+            <span className="clip-count">{job.clips?.length || 0} clips</span>
+          </div>
+          <div className="clip-history-clips">
+            {job.clips?.map((clip, idx) => (
+              <div key={idx} className="history-clip-card">
+                <div className="clip-score">
+                  <span className="score">{clip.virality_score}</span>
+                  <span className="category">{clip.category}</span>
+                </div>
+                <video 
+                  src={`${API_BASE}${clip.video_url}`}
+                  controls
+                  preload="metadata"
+                />
+                <p className="clip-reason">{clip.virality_reason}</p>
+                <div className="clip-actions">
+                  <a 
+                    href={`${API_BASE}${clip.video_url}`}
+                    download={`clip_${clip.index}.mp4`}
+                    className="btn btn-sm btn-primary"
+                  >
+                    ⬇️ Download
+                  </a>
+                  <button 
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => navigator.clipboard.writeText(clip.suggested_caption)}
+                  >
+                    📋 Copy Caption
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

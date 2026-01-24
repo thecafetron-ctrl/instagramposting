@@ -3290,3 +3290,111 @@
   font-size: 0.85rem;
   color: var(--color-text-muted);
 }
+
+/* Clip History Styles */
+.clip-history {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.clip-history-job {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.clip-history-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.job-date {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.source-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.source-link:hover {
+  text-decoration: underline;
+}
+
+.clip-count {
+  margin-left: auto;
+  background: var(--color-accent);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.clip-history-clips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.history-clip-card {
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.history-clip-card .clip-score {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+}
+
+.history-clip-card .clip-score .score {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: white;
+}
+
+.history-clip-card .clip-score .category {
+  font-size: 0.75rem;
+  background: rgba(255,255,255,0.2);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  color: white;
+}
+
+.history-clip-card video {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  background: #000;
+}
+
+.history-clip-card .clip-reason {
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.history-clip-card .clip-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.history-clip-card .clip-actions .btn {
+  flex: 1;
+  font-size: 0.75rem;
+}

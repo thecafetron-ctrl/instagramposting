@@ -1,6 +1,7 @@
 """API routes for video clipper and captioner."""
 
 import asyncio
+import json
 import logging
 import os
 import secrets
@@ -37,9 +38,43 @@ _video_cache: Dict[str, str] = {}
 # Viral analysis results - maps job_id to list of ViralMoment candidates
 _viral_candidates: Dict[str, List[dict]] = {}
 
+# Clip history - persisted to disk
+_clip_history: List[dict] = []
+CLIP_HISTORY_FILE = Path("generated_clips/clip_history.json")
+
 # Output directory
 CLIPS_OUTPUT_DIR = Path("generated_clips")
 CLIPS_OUTPUT_DIR.mkdir(exist_ok=True)
+
+# Load clip history on startup
+def load_clip_history():
+    global _clip_history
+    if CLIP_HISTORY_FILE.exists():
+        try:
+            with open(CLIP_HISTORY_FILE) as f:
+                _clip_history = json.load(f)
+        except:
+            _clip_history = []
+
+def save_clip_history():
+    with open(CLIP_HISTORY_FILE, "w") as f:
+        json.dump(_clip_history, f, indent=2)
+
+def add_to_clip_history(job_id: str, clips: List[dict], youtube_url: str = None):
+    """Add completed clips to history."""
+    entry = {
+        "job_id": job_id,
+        "created_at": datetime.now().isoformat(),
+        "youtube_url": youtube_url,
+        "clips": clips,
+    }
+    _clip_history.insert(0, entry)  # Add to beginning (newest first)
+    # Keep only last 50 jobs
+    if len(_clip_history) > 50:
+        _clip_history = _clip_history[:50]
+    save_clip_history()
+
+load_clip_history()
 
 
 class ClipperConfigRequest(BaseModel):
@@ -1562,8 +1597,8 @@ def run_full_railway_processing(
             
             results.append({
                 "index": i + 1,
-                "video_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}.mp4",
-                "thumbnail_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}_thumb.jpg" if thumb_path else None,
+                "video_url": f"/api/clipper/clips/{job_id}/{clip_name}.mp4",
+                "thumbnail_url": f"/api/clipper/clips/{job_id}/{clip_name}_thumb.jpg" if thumb_path else None,
                 "start_time": clip["start_time"],
                 "end_time": clip["end_time"],
                 "duration": clip["duration"],
@@ -1585,6 +1620,9 @@ def run_full_railway_processing(
         
         update_job_progress(job_id, "completed", 1.0, "Complete!", f"Created {len(results)} viral clips")
         add_job_log(job_id, f"✓ All done! {len(results)} clips ready", "success")
+        
+        # Save to history
+        add_to_clip_history(job_id, results, youtube_url)
         
     except Exception as e:
         logger.exception(f"Full Railway processing failed for {job_id}")
@@ -2147,8 +2185,8 @@ def render_smart_clips(
             results.append({
                 "index": i + 1,
                 "video_path": str(clip_path),
-                "video_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}.mp4",
-                "thumbnail_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}_thumb.jpg" if thumb_path else None,
+                "video_url": f"/api/clipper/clips/{job_id}/{clip_name}.mp4",
+                "thumbnail_url": f"/api/clipper/clips/{job_id}/{clip_name}_thumb.jpg" if thumb_path else None,
                 "start_time": clip["start_time"],
                 "end_time": clip["end_time"],
                 "duration": clip["duration"],
@@ -2201,6 +2239,10 @@ def render_smart_clips(
             f"Created {len(results)} viral clips!"
         )
         
+        # Save to history
+        youtube_url = _worker_job_configs.get(job_id, {}).get("youtube_url")
+        add_to_clip_history(job_id, results, youtube_url)
+        
         logger.info(f"Smart render complete for {job_id}: {len(results)} clips")
         
     except Exception as e:
@@ -2230,4 +2272,13 @@ async def get_smart_results(job_id: str):
     return {
         "status": "completed",
         "clips": results,
+    }
+
+
+@router.get("/history")
+async def get_clip_history(limit: int = 20):
+    """Get history of completed clip jobs."""
+    return {
+        "history": _clip_history[:limit],
+        "total": len(_clip_history),
     }
