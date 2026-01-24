@@ -3,12 +3,13 @@
 import asyncio
 import logging
 import os
+import secrets
 import shutil
 import tempfile
 import threading
 import uuid
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 
 from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Form
@@ -767,3 +768,314 @@ async def list_jobs():
     jobs.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     
     return {"jobs": jobs}
+
+
+# ============================================================================
+# LOCAL WORKER ENDPOINTS
+# These endpoints allow a local worker (your PC) to process jobs
+# ============================================================================
+
+# Track registered workers and jobs waiting for workers
+_registered_workers: Dict[str, dict] = {}
+_worker_queue: List[dict] = []  # Jobs waiting for a worker
+_worker_job_configs: Dict[str, dict] = {}  # job_id -> full job config for workers
+
+
+@router.post("/worker/register")
+async def register_worker(data: dict):
+    """Register a local worker."""
+    worker_id = data.get("worker_id")
+    if not worker_id:
+        raise HTTPException(status_code=400, detail="worker_id required")
+    
+    _registered_workers[worker_id] = {
+        "worker_id": worker_id,
+        "capabilities": data.get("capabilities", []),
+        "platform": data.get("platform", "unknown"),
+        "registered_at": datetime.now().isoformat(),
+        "last_seen": datetime.now().isoformat(),
+    }
+    
+    logger.info(f"Worker registered: {worker_id}")
+    
+    return {"status": "registered", "worker_id": worker_id}
+
+
+@router.get("/worker/jobs/pending")
+async def get_pending_worker_job(worker_id: str = None):
+    """Get a pending job for a local worker to process."""
+    if worker_id and worker_id in _registered_workers:
+        _registered_workers[worker_id]["last_seen"] = datetime.now().isoformat()
+    
+    # Find a job that needs worker processing
+    for job_id, progress in _job_progress.items():
+        if progress.get("mode") == "worker" and progress["status"] == "queued":
+            # Claim this job
+            progress["status"] = "processing"
+            progress["worker_id"] = worker_id
+            progress["stage"] = "Assigned to worker"
+            
+            # Return job config
+            config = _worker_job_configs.get(job_id, {})
+            
+            return {
+                "job": {
+                    "job_id": job_id,
+                    "video_url": config.get("video_url"),
+                    "youtube_url": config.get("youtube_url"),
+                    "config": config.get("pipeline_config", {}),
+                }
+            }
+    
+    return {"job": None}
+
+
+@router.post("/worker/jobs/{job_id}/progress")
+async def update_worker_job_progress(job_id: str, data: dict):
+    """Update job progress from a local worker."""
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    progress = data.get("progress", 0)
+    stage = data.get("stage", "Processing")
+    detail = data.get("detail", "")
+    
+    update_job_progress(job_id, "processing", progress, stage, detail)
+    
+    # Check if job was cancelled
+    if _job_cancel_flags.get(job_id):
+        return {"status": "cancelled", "should_stop": True}
+    
+    return {"status": "ok", "should_stop": False}
+
+
+@router.post("/worker/jobs/{job_id}/upload-clip")
+async def upload_worker_clip(
+    job_id: str,
+    file: UploadFile = File(...),
+    index: int = Form(...),
+    start_time: float = Form(...),
+    end_time: float = Form(...),
+    duration: float = Form(...),
+    score: float = Form(...),
+    text: str = Form(""),
+):
+    """Upload a processed clip from a local worker."""
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Save the clip
+    job_dir = CLIPS_OUTPUT_DIR / job_id / "clips"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    
+    clip_path = job_dir / f"clip_{index:02d}.mp4"
+    
+    with open(clip_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+    
+    logger.info(f"Worker uploaded clip {index} for job {job_id}")
+    
+    return {
+        "status": "uploaded",
+        "clip_path": str(clip_path),
+        "video_url": f"/api/clipper/clips/{job_id}/clip_{index:02d}.mp4",
+    }
+
+
+@router.post("/worker/jobs/{job_id}/complete")
+async def complete_worker_job(job_id: str, data: dict):
+    """Mark a worker job as complete."""
+    if job_id not in _job_progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    success = data.get("success", False)
+    error = data.get("error")
+    clips_count = data.get("clips_count", 0)
+    processing_time = data.get("processing_time", 0)
+    
+    if success:
+        # Build a minimal result
+        from .pipeline import PipelineResult, ClipResult
+        
+        # Find the uploaded clips
+        clips_dir = CLIPS_OUTPUT_DIR / job_id / "clips"
+        clips = []
+        
+        if clips_dir.exists():
+            for i, clip_file in enumerate(sorted(clips_dir.glob("clip_*.mp4"))):
+                clips.append(ClipResult(
+                    index=i + 1,
+                    video_path=str(clip_file),
+                    thumbnail_path=None,
+                    start_time=0,
+                    end_time=0,
+                    duration=0,
+                    score=1.0,
+                    text=""
+                ))
+        
+        result = PipelineResult(
+            success=True,
+            source_video="worker",
+            output_dir=str(CLIPS_OUTPUT_DIR / job_id),
+            transcript_json="",
+            transcript_srt="",
+            clips=clips,
+            total_duration=0,
+            processing_time=processing_time,
+        )
+        
+        _job_results[job_id] = result
+        update_job_progress(job_id, "completed", 1.0, "Complete", f"Created {clips_count} clips")
+        
+        logger.info(f"Worker job {job_id} completed successfully with {clips_count} clips")
+    else:
+        update_job_progress(job_id, "failed", 0, "Failed", error or "Unknown error")
+        _job_progress[job_id]["error"] = error or "Worker processing failed"
+        
+        logger.error(f"Worker job {job_id} failed: {error}")
+    
+    return {"status": "ok", "job_id": job_id}
+
+
+@router.get("/worker/status")
+async def get_worker_status():
+    """Get status of registered workers and queued jobs."""
+    # Clean up stale workers (not seen in 5 minutes)
+    now = datetime.now()
+    stale_workers = []
+    for worker_id, worker in _registered_workers.items():
+        last_seen = datetime.fromisoformat(worker["last_seen"])
+        if (now - last_seen).total_seconds() > 300:
+            stale_workers.append(worker_id)
+    
+    for worker_id in stale_workers:
+        del _registered_workers[worker_id]
+    
+    # Count jobs waiting for workers
+    queued_for_worker = sum(
+        1 for p in _job_progress.values()
+        if p.get("mode") == "worker" and p["status"] == "queued"
+    )
+    
+    return {
+        "workers": list(_registered_workers.values()),
+        "workers_online": len(_registered_workers),
+        "jobs_queued_for_worker": queued_for_worker,
+    }
+
+
+# Modify upload to support worker mode
+@router.post("/upload-for-worker")
+async def upload_video_for_worker(
+    video: UploadFile = File(...),
+    num_clips: int = Form(10),
+    min_duration: float = Form(20),
+    max_duration: float = Form(60),
+    pause_threshold: float = Form(0.7),
+    caption_style: str = Form("default"),
+    whisper_model: str = Form("base"),
+    burn_captions: bool = Form(True),
+    crop_vertical: bool = Form(True),
+    auto_center: bool = Form(True),
+):
+    """Upload a video to be processed by a local worker."""
+    job_id = secrets.token_hex(4)
+    
+    # Save uploaded file
+    job_dir = CLIPS_OUTPUT_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    
+    input_path = job_dir / "input.mp4"
+    with open(input_path, "wb") as f:
+        content = await video.read()
+        f.write(content)
+    
+    # Store job config for worker
+    _worker_job_configs[job_id] = {
+        "video_url": f"/api/clipper/clips/{job_id}/input.mp4",
+        "pipeline_config": {
+            "num_clips": num_clips,
+            "min_duration": min_duration,
+            "max_duration": max_duration,
+            "pause_threshold": pause_threshold,
+            "caption_style": caption_style,
+            "whisper_model": whisper_model,
+            "burn_captions": burn_captions,
+            "crop_vertical": crop_vertical,
+            "auto_center": auto_center,
+        }
+    }
+    
+    # Initialize progress in worker mode
+    _job_progress[job_id] = {
+        "status": "queued",
+        "progress": 0,
+        "stage": "Waiting for worker",
+        "detail": "Job queued - waiting for a local worker to pick it up",
+        "mode": "worker",
+        "updated_at": datetime.now().isoformat(),
+    }
+    
+    logger.info(f"Job {job_id} queued for local worker")
+    
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "Job queued for local worker. Make sure your local worker is running!"
+    }
+
+
+@router.post("/youtube-for-worker")
+async def youtube_for_worker(
+    youtube_url: str = Form(...),
+    num_clips: int = Form(10),
+    min_duration: float = Form(20),
+    max_duration: float = Form(60),
+    pause_threshold: float = Form(0.7),
+    caption_style: str = Form("default"),
+    whisper_model: str = Form("base"),
+    burn_captions: bool = Form(True),
+    crop_vertical: bool = Form(True),
+    auto_center: bool = Form(True),
+):
+    """Queue a YouTube video to be processed by a local worker."""
+    job_id = secrets.token_hex(4)
+    
+    job_dir = CLIPS_OUTPUT_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Store job config for worker
+    _worker_job_configs[job_id] = {
+        "youtube_url": youtube_url,
+        "pipeline_config": {
+            "num_clips": num_clips,
+            "min_duration": min_duration,
+            "max_duration": max_duration,
+            "pause_threshold": pause_threshold,
+            "caption_style": caption_style,
+            "whisper_model": whisper_model,
+            "burn_captions": burn_captions,
+            "crop_vertical": crop_vertical,
+            "auto_center": auto_center,
+        }
+    }
+    
+    # Initialize progress in worker mode
+    _job_progress[job_id] = {
+        "status": "queued",
+        "progress": 0,
+        "stage": "Waiting for worker",
+        "detail": f"YouTube job queued - waiting for a local worker",
+        "mode": "worker",
+        "updated_at": datetime.now().isoformat(),
+    }
+    
+    logger.info(f"YouTube job {job_id} queued for local worker: {youtube_url}")
+    
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "YouTube job queued for local worker. Make sure your local worker is running!"
+    }

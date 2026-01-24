@@ -1311,23 +1311,48 @@ function VideoClipperPage() {
   const [burnCaptions, setBurnCaptions] = useState(savedSettings?.burnCaptions ?? true)
   const [cropVertical, setCropVertical] = useState(savedSettings?.cropVertical ?? true)
   const [autoCenter, setAutoCenter] = useState(savedSettings?.autoCenter ?? true)
+  const [useLocalWorker, setUseLocalWorker] = useState(savedSettings?.useLocalWorker ?? false)
+  
+  // Worker status
+  const [workerStatus, setWorkerStatus] = useState(null)
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
     const settings = {
       numClips, minDuration, maxDuration, pauseThreshold,
-      captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter
+      captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, useLocalWorker
     }
     localStorage.setItem('clipper_settings', JSON.stringify(settings))
-  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter])
+  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, useLocalWorker])
 
   useEffect(() => {
     checkClipperStatus()
     fetchCaptionStyles()
+    if (useLocalWorker) checkWorkerStatus()
     return () => {
       if (pollInterval) clearInterval(pollInterval)
     }
   }, [])
+  
+  // Check worker status when toggled
+  useEffect(() => {
+    if (useLocalWorker) {
+      checkWorkerStatus()
+      const interval = setInterval(checkWorkerStatus, 10000) // Check every 10s
+      return () => clearInterval(interval)
+    }
+  }, [useLocalWorker])
+  
+  const checkWorkerStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/clipper/worker/status`)
+      const data = await res.json()
+      setWorkerStatus(data)
+    } catch (err) {
+      console.error('Failed to check worker status:', err)
+      setWorkerStatus({ workers_online: 0 })
+    }
+  }
 
   const checkClipperStatus = async () => {
     try {
@@ -1358,7 +1383,8 @@ function VideoClipperPage() {
     setJobResult(null)
 
     const formData = new FormData()
-    formData.append('file', file)
+    // Field name differs between endpoints
+    formData.append(useLocalWorker ? 'video' : 'file', file)
     formData.append('num_clips', numClips)
     formData.append('min_duration', minDuration)
     formData.append('max_duration', maxDuration)
@@ -1369,15 +1395,21 @@ function VideoClipperPage() {
     formData.append('crop_vertical', cropVertical)
     formData.append('auto_center', autoCenter)
 
+    // Use worker endpoint if enabled
+    const endpoint = useLocalWorker 
+      ? `${API_BASE}/clipper/upload-for-worker` 
+      : `${API_BASE}/clipper/upload`
+
     try {
-      const res = await fetch(`${API_BASE}/clipper/upload`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         body: formData,
       })
       const data = await res.json()
       
       if (data.job_id) {
-        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: 'Starting' })
+        const initialStage = useLocalWorker ? 'Waiting for local worker' : 'Starting'
+        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: initialStage })
         startPolling(data.job_id)
       } else {
         alert('Upload failed: ' + (data.detail || 'Unknown error'))
@@ -1396,27 +1428,33 @@ function VideoClipperPage() {
     setUploading(true)
     setJobResult(null)
 
+    // Use worker endpoint if enabled
+    const endpoint = useLocalWorker 
+      ? `${API_BASE}/clipper/youtube-for-worker`
+      : `${API_BASE}/clipper/youtube`
+
     try {
-      const res = await fetch(`${API_BASE}/clipper/youtube`, {
+      const formData = new FormData()
+      formData.append('youtube_url', youtubeUrl.trim())
+      formData.append('num_clips', numClips)
+      formData.append('min_duration', minDuration)
+      formData.append('max_duration', maxDuration)
+      formData.append('pause_threshold', pauseThreshold)
+      formData.append('caption_style', captionStyle)
+      formData.append('whisper_model', whisperModel)
+      formData.append('burn_captions', burnCaptions)
+      formData.append('crop_vertical', cropVertical)
+      formData.append('auto_center', autoCenter)
+
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: youtubeUrl.trim(),
-          num_clips: numClips,
-          min_duration: minDuration,
-          max_duration: maxDuration,
-          pause_threshold: pauseThreshold,
-          caption_style: captionStyle,
-          whisper_model: whisperModel,
-          burn_captions: burnCaptions,
-          crop_vertical: cropVertical,
-          auto_center: autoCenter,
-        }),
+        body: formData,
       })
       const data = await res.json()
       
       if (data.job_id) {
-        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: 'Downloading from YouTube...' })
+        const initialStage = useLocalWorker ? 'Waiting for local worker...' : 'Downloading from YouTube...'
+        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: initialStage })
         startPolling(data.job_id)
         setYoutubeUrl('')
       } else {
@@ -1688,6 +1726,48 @@ function VideoClipperPage() {
           <p className="memory-warning">
             ⚠️ Captions require loading Whisper AI model (~1GB RAM). If you're on Railway free tier, this may crash. Disable captions to skip transcription.
           </p>
+        )}
+      </div>
+
+      {/* Local Worker Mode */}
+      <div className={`clipper-card worker-card ${useLocalWorker ? 'worker-enabled' : ''}`}>
+        <div className="worker-header">
+          <label className="checkbox-label worker-toggle">
+            <input 
+              type="checkbox" 
+              checked={useLocalWorker}
+              onChange={(e) => setUseLocalWorker(e.target.checked)}
+            />
+            <span>🖥️ Use Local Worker (Your PC)</span>
+          </label>
+          {useLocalWorker && workerStatus && (
+            <span className={`worker-status ${workerStatus.workers_online > 0 ? 'online' : 'offline'}`}>
+              {workerStatus.workers_online > 0 
+                ? `✅ ${workerStatus.workers_online} worker(s) online` 
+                : '❌ No workers online'}
+            </span>
+          )}
+        </div>
+        
+        {useLocalWorker && (
+          <div className="worker-info">
+            <p><strong>How it works:</strong> Jobs are queued on Railway, but processed on YOUR computer using your GPU/CPU.</p>
+            <details>
+              <summary>📋 Setup Instructions</summary>
+              <ol>
+                <li>Open Terminal on your PC</li>
+                <li>Navigate to the backend folder</li>
+                <li>Run: <code>python -m app.services.clipper.worker --server {window.location.origin}</code></li>
+                <li>Keep the terminal open while processing</li>
+              </ol>
+              <pre className="worker-command">
+python -m app.services.clipper.worker --server {window.location.origin}
+              </pre>
+            </details>
+            {workerStatus?.workers_online === 0 && (
+              <p className="worker-warning">⚠️ No workers connected. Start the worker on your PC to process jobs.</p>
+            )}
+          </div>
         )}
       </div>
 
