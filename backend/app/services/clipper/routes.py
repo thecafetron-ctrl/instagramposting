@@ -358,7 +358,7 @@ def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
             update_job_progress(job_id, "processing", 0.10, "Download complete", "Merging audio/video...")
     
     ydl_opts = {
-        'format': 'best',
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
         'outtmpl': str(output_path.with_suffix('')),
         'merge_output_format': 'mp4',
         'quiet': True,
@@ -367,10 +367,14 @@ def download_youtube_video(url: str, output_dir: Path, job_id: str) -> str:
         'progress_hooks': [progress_hook],
         'socket_timeout': 120,
         'retries': 10,
+        'fragment_retries': 10,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
+        'check_formats': False,
         'nocheckcertificate': True,
+        'source_address': '0.0.0.0',
     }
     
     update_job_progress(job_id, "processing", 0.02, "Connecting to YouTube", "Fetching video info...")
@@ -1223,7 +1227,7 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
     
     try:
         ydl_opts = {
-            'format': 'best',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
             'outtmpl': str(input_path.with_suffix('')),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
@@ -1231,8 +1235,11 @@ def download_youtube_for_worker(job_id: str, youtube_url: str, job_dir: Path):
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             },
+            'check_formats': False,
             'nocheckcertificate': True,
             'retries': 10,
+            'fragment_retries': 10,
+            'source_address': '0.0.0.0',
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1531,24 +1538,33 @@ def run_full_railway_processing(
             output_template = str(job_dir / "input.%(ext)s")
             
             ydl_opts = {
-                # Simple format - let yt-dlp choose best available
-                'format': 'best',
+                # Use bestvideo+bestaudio with fallbacks
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
                 'outtmpl': output_template,
                 'progress_hooks': [progress_hook],
                 'quiet': False,
                 'no_warnings': False,
-                # Simple headers
+                'verbose': True,  # Enable verbose for debugging
+                # Merge to mp4
+                'merge_output_format': 'mp4',
+                # Headers
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
                 },
-                # Minimal options - let yt-dlp handle it
+                # Important: don't check formats (can cause empty files)
+                'check_formats': False,
                 'nocheckcertificate': True,
                 'socket_timeout': 120,
                 'retries': 10,
+                'fragment_retries': 10,
+                # Force IPv4 (IPv6 can cause issues)
+                'source_address': '0.0.0.0',
             }
             
             try:
-                add_job_log(job_id, f"Starting yt-dlp download (using iOS client)...")
+                add_job_log(job_id, f"Starting yt-dlp download...")
                 add_job_log(job_id, f"Output template: {output_template}")
                 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2030,7 +2046,7 @@ def download_video_only(job_id: str, job_dir: Path, youtube_url: str):
         add_job_log(job_id, "Fetching video info from YouTube...")
         
         ydl_opts = {
-            'format': 'best',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
             'outtmpl': str(input_path.with_suffix('')),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
@@ -2038,8 +2054,11 @@ def download_video_only(job_id: str, job_dir: Path, youtube_url: str):
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             },
+            'check_formats': False,
             'nocheckcertificate': True,
             'retries': 10,
+            'fragment_retries': 10,
+            'source_address': '0.0.0.0',
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2129,17 +2148,21 @@ def run_smart_analysis(
             output_template = str(job_dir / "input.%(ext)s")
             
             ydl_opts = {
-                'format': 'best',
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
                 'outtmpl': output_template,
+                'merge_output_format': 'mp4',
                 'progress_hooks': [progress_hook],
                 'quiet': False,
                 'no_warnings': False,
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 },
+                'check_formats': False,
                 'nocheckcertificate': True,
                 'socket_timeout': 120,
                 'retries': 10,
+                'fragment_retries': 10,
+                'source_address': '0.0.0.0',
             }
             
             try:
