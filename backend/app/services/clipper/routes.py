@@ -1622,17 +1622,74 @@ def run_full_railway_processing(
                         raise Exception("No suitable stream found")
                         
                 except Exception as pytube_err:
-                    add_job_log(job_id, f"✗ pytubefix also failed: {pytube_err}", "error")
-                    logger.error(f"Both downloaders failed: yt-dlp={dl_err}, pytubefix={pytube_err}")
+                    add_job_log(job_id, f"✗ pytubefix failed: {pytube_err}", "warning")
+                    logger.warning(f"pytubefix failed, trying Cobalt API: {pytube_err}")
                     
-                    # Give helpful error messages
-                    if "403" in error_msg or "403" in str(pytube_err):
-                        add_job_log(job_id, "⚠️ YouTube is blocking this download. Try a different video or try again later.", "error")
-                    elif "private" in error_msg.lower() or "private" in str(pytube_err).lower():
-                        add_job_log(job_id, "This video is private.", "error")
-                    
-                    update_job_progress(job_id, "failed", 0, "Download failed", f"Both yt-dlp and pytubefix failed: {error_msg[:100]}")
-                    return
+                    # FALLBACK 3: Try Cobalt API
+                    add_job_log(job_id, "🔄 Trying Cobalt API...", "info")
+                    try:
+                        import requests
+                        
+                        # Try multiple Cobalt instances
+                        cobalt_instances = [
+                            "https://api.cobalt.tools",
+                            "https://co.wuk.sh",
+                        ]
+                        
+                        cobalt_success = False
+                        for cobalt_url in cobalt_instances:
+                            try:
+                                add_job_log(job_id, f"Trying {cobalt_url}...")
+                                
+                                response = requests.post(
+                                    f"{cobalt_url}/api/json",
+                                    json={
+                                        "url": youtube_url,
+                                        "vQuality": "720",
+                                        "filenamePattern": "basic",
+                                    },
+                                    headers={
+                                        "Accept": "application/json",
+                                        "Content-Type": "application/json",
+                                    },
+                                    timeout=30
+                                )
+                                
+                                if response.status_code == 200:
+                                    data = response.json()
+                                    if data.get("status") == "stream" or data.get("status") == "redirect":
+                                        download_url = data.get("url")
+                                        if download_url:
+                                            add_job_log(job_id, "Got download URL, downloading...")
+                                            
+                                            # Download the file
+                                            video_response = requests.get(download_url, stream=True, timeout=300)
+                                            if video_response.status_code == 200:
+                                                with open(job_dir / "input.mp4", 'wb') as f:
+                                                    for chunk in video_response.iter_content(chunk_size=8192):
+                                                        f.write(chunk)
+                                                add_job_log(job_id, "✓ Download complete via Cobalt!", "success")
+                                                cobalt_success = True
+                                                break
+                            except Exception as inst_err:
+                                logger.warning(f"Cobalt instance {cobalt_url} failed: {inst_err}")
+                                continue
+                        
+                        if not cobalt_success:
+                            raise Exception("All Cobalt instances failed")
+                            
+                    except Exception as cobalt_err:
+                        add_job_log(job_id, f"✗ All download methods failed", "error")
+                        logger.error(f"All downloaders failed: yt-dlp={dl_err}, pytubefix={pytube_err}, cobalt={cobalt_err}")
+                        
+                        # Give helpful error messages
+                        if "403" in error_msg or "403" in str(pytube_err):
+                            add_job_log(job_id, "⚠️ YouTube is actively blocking downloads. This may be a temporary issue - try again in a few minutes or use a different video.", "error")
+                        elif "private" in error_msg.lower() or "private" in str(pytube_err).lower():
+                            add_job_log(job_id, "This video is private.", "error")
+                        
+                        update_job_progress(job_id, "failed", 0, "Download failed", f"All methods failed (yt-dlp, pytubefix, cobalt): {error_msg[:80]}")
+                        return
             
             # Find downloaded file - check all files in directory
             add_job_log(job_id, f"Looking for downloaded file in {job_dir}")
