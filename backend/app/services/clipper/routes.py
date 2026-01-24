@@ -1554,19 +1554,31 @@ def run_full_railway_processing(
             json.dump(candidates, f, indent=2)
         
         update_job_progress(job_id, "processing", 0.50, "Analysis complete", f"AI editing top {num_clips} clips...")
-        add_job_log(job_id, f"🎬 Starting AI video editing for {num_clips} clips...", eta=f"~{num_clips * 30}s")
+        add_job_log(job_id, f"🎬 Starting AI video editing for {num_clips} clips...", eta=f"~{num_clips * 45}s")
         
-        # Step 4: AI-Powered Rendering with Dynamic Captions
+        # Step 4: AI-Powered Rendering with Dynamic Captions + Audio
         selected = [c for c in candidates if c.get("selected")][:num_clips]
         clips_dir = job_dir / "clips"
         clips_dir.mkdir(exist_ok=True)
         
+        # Import audio effects
+        try:
+            from .audio_effects import add_viral_audio_package
+            has_audio_fx = True
+            add_job_log(job_id, "🎵 Audio effects module loaded")
+        except Exception as e:
+            has_audio_fx = False
+            add_job_log(job_id, f"Audio effects unavailable: {e}", "warning")
+        
         # Initialize AI editor
         ai_editor = AIVideoEditor(
             enable_effects=True,
-            enable_music=False,  # No default music tracks
+            enable_music=False,  # We'll add music via audio_effects module
             caption_style="dynamic",
         )
+        
+        # Initialize progressive results storage
+        _viral_candidates[job_id + "_results"] = []
         
         results = []
         for i, clip in enumerate(selected):
@@ -1658,7 +1670,39 @@ def run_full_railway_processing(
                 hook_text = ""
                 effects_applied = []
             
-            results.append({
+            # Add viral audio package (music + sound effects)
+            if has_audio_fx and clip_path.exists():
+                try:
+                    add_job_log(job_id, f"   → Adding background music + sound effects")
+                    final_path = clips_dir / f"{clip_name}_final.mp4"
+                    
+                    # Determine music style based on category
+                    music_styles = {
+                        "funny": "funny",
+                        "emotional": "dramatic",
+                        "educational": "chill",
+                        "controversial": "dramatic",
+                        "shocking": "dramatic",
+                    }
+                    music_style = music_styles.get(clip.get("category", ""), "upbeat")
+                    
+                    add_viral_audio_package(
+                        clip_path, final_path,
+                        music_style=music_style,
+                        add_whoosh_at_start=True,
+                        add_bass_on_hook=True,
+                        hook_timestamp=0.5,
+                    )
+                    
+                    # Replace original with final
+                    if final_path.exists():
+                        clip_path.unlink()
+                        final_path.rename(clip_path)
+                        add_job_log(job_id, f"   ✓ Audio effects added", "success")
+                except Exception as e:
+                    add_job_log(job_id, f"   ⚠ Audio effects failed: {e}", "warning")
+            
+            clip_result = {
                 "index": i + 1,
                 "video_url": f"/api/clipper/clips/{job_id}/{clip_name}.mp4",
                 "thumbnail_url": f"/api/clipper/clips/{job_id}/{clip_name}_thumb.jpg" if thumb_path else None,
@@ -1672,10 +1716,16 @@ def run_full_railway_processing(
                 "category": clip["category"],
                 "text": clip["text"],
                 "hook_text": hook_text,
-                "effects_applied": effects_applied,
-            })
+                "effects_applied": effects_applied + (["music", "whoosh", "bass_drop"] if has_audio_fx else []),
+                "ready": True,  # Mark as ready for immediate display
+            }
             
-            add_job_log(job_id, f"✓ Clip {i+1} complete", "success")
+            results.append(clip_result)
+            
+            # Store progressively so frontend can show clips as they complete
+            _viral_candidates[job_id + "_results"] = results.copy()
+            
+            add_job_log(job_id, f"✓ Clip {i+1} READY - can be viewed now!", "success")
         
         # Store results
         _viral_candidates[job_id + "_results"] = results

@@ -1584,14 +1584,21 @@ function VideoClipperPage() {
         // Simple phase management - everything on Railway
         if (data.status === 'processing') {
           setClipperPhase('downloading') // Show progress bar
+          
+          // Fetch any completed clips progressively (every 5 polls)
+          if (Math.random() < 0.2) { // ~20% chance each poll to reduce load
+            fetchSmartResults(jobId, false) // Not final
+          }
         } else if (data.status === 'completed') {
           clearInterval(interval)
           setPollInterval(null)
-          fetchSmartResults(jobId)
+          fetchSmartResults(jobId, true) // Final fetch
+          localStorage.removeItem('clipper_current_job')
         } else if (data.status === 'failed') {
           clearInterval(interval)
           setPollInterval(null)
           setCurrentJob(prev => ({ ...prev, error: data.error || data.detail }))
+          localStorage.removeItem('clipper_current_job')
           setClipperPhase('input')
         }
       } catch (err) {
@@ -1602,18 +1609,72 @@ function VideoClipperPage() {
     setPollInterval(interval)
   }
   
-  const fetchSmartResults = async (jobId) => {
+  const handleCancelJob = async () => {
+    if (!currentJob?.id) return
+    
+    try {
+      await fetch(`${API_BASE}/clipper/job/${currentJob.id}/cancel`, { method: 'POST' })
+      if (pollInterval) {
+        clearInterval(pollInterval)
+        setPollInterval(null)
+      }
+      setCurrentJob(null)
+      setClipperPhase('input')
+      setSmartResults([])
+      localStorage.removeItem('clipper_current_job')
+    } catch (err) {
+      console.error('Cancel failed:', err)
+    }
+  }
+  
+  const fetchSmartResults = async (jobId, isFinal = false) => {
     try {
       const res = await fetch(`${API_BASE}/clipper/smart/${jobId}/results`)
       const data = await res.json()
-      if (data.clips) {
-        setSmartResults(data.clips)
-        setClipperPhase('done')
+      if (data.clips && data.clips.length > 0) {
+        // Update with any new completed clips (progressive loading)
+        setSmartResults(data.clips.filter(c => c.ready !== false))
+        if (isFinal) {
+          setClipperPhase('done')
+          // Clear persisted job when done
+          localStorage.removeItem('clipper_current_job')
+        }
       }
     } catch (err) {
       console.error('Failed to fetch results:', err)
     }
   }
+  
+  // Persist current job to localStorage for tab switching
+  useEffect(() => {
+    if (currentJob?.id && currentJob.status === 'processing') {
+      localStorage.setItem('clipper_current_job', JSON.stringify({
+        id: currentJob.id,
+        startedAt: Date.now(),
+      }))
+    }
+  }, [currentJob?.id, currentJob?.status])
+  
+  // Resume job on page load if one was running
+  useEffect(() => {
+    const savedJob = localStorage.getItem('clipper_current_job')
+    if (savedJob && !currentJob) {
+      try {
+        const { id, startedAt } = JSON.parse(savedJob)
+        // Only resume if less than 30 minutes old
+        if (Date.now() - startedAt < 30 * 60 * 1000) {
+          console.log('Resuming job:', id)
+          setCurrentJob({ id, status: 'resuming', progress: 0, stage: 'Reconnecting...' })
+          setClipperPhase('downloading')
+          startSmartPolling(id)
+        } else {
+          localStorage.removeItem('clipper_current_job')
+        }
+      } catch (e) {
+        localStorage.removeItem('clipper_current_job')
+      }
+    }
+  }, [])
   
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60)
@@ -2076,12 +2137,20 @@ function VideoClipperPage() {
         <div className="clipper-card progress-card">
           <div className="progress-header">
             <h3>☁️ Processing on Railway</h3>
-            <button 
-              className="btn btn-sm btn-secondary"
-              onClick={() => setShowLogs(!showLogs)}
-            >
-              {showLogs ? '📋 Hide Logs' : '📋 Show Logs'}
-            </button>
+            <div className="progress-actions">
+              <button 
+                className="btn btn-sm btn-secondary"
+                onClick={() => setShowLogs(!showLogs)}
+              >
+                {showLogs ? '📋 Hide Logs' : '📋 Show Logs'}
+              </button>
+              <button 
+                className="btn btn-sm btn-danger"
+                onClick={handleCancelJob}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
           <div className="progress-bar-container">
             <div 
@@ -2099,17 +2168,46 @@ function VideoClipperPage() {
           </div>
           
           <p className="progress-hint">
-            ☁️ Everything runs on Railway - just sit back and relax!
+            ☁️ You can switch tabs - processing continues in background!
           </p>
+          
+          {/* Show completed clips while processing */}
+          {smartResults.length > 0 && (
+            <div className="early-results">
+              <h4>✅ Clips Ready ({smartResults.length})</h4>
+              <div className="early-clips-grid">
+                {smartResults.map((clip, i) => (
+                  <div key={i} className="early-clip">
+                    <video 
+                      src={`${API_BASE}${clip.video_url}`} 
+                      controls 
+                      preload="metadata"
+                    />
+                    <div className="early-clip-info">
+                      <span className="score">🔥 {clip.virality_score}</span>
+                      <a 
+                        href={`${API_BASE}${clip.video_url}`}
+                        download
+                        className="btn btn-sm btn-primary"
+                      >
+                        ⬇️
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           
           {showLogs && jobLogs.length > 0 && (
             <div className="job-logs">
               <h4>📋 Live Logs</h4>
               <div className="logs-container">
-                {jobLogs.map((log, i) => (
+                {jobLogs.slice(-20).map((log, i) => (
                   <div key={i} className={`log-entry log-${log.level}`}>
                     <span className="log-time">{new Date(log.time).toLocaleTimeString()}</span>
                     <span className="log-message">{log.message}</span>
+                    {log.eta && <span className="log-eta">({log.eta})</span>}
                   </div>
                 ))}
               </div>

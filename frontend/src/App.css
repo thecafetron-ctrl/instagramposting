@@ -3256,6 +3256,59 @@
   color: #ffaa00;
 }
 
+.log-eta {
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
+/* Early Results - clips shown while processing */
+.early-results {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.early-results h4 {
+  color: #00c864;
+  margin-bottom: 1rem;
+}
+
+.early-clips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.early-clip {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.early-clip video {
+  width: 100%;
+  aspect-ratio: 9/16;
+  object-fit: cover;
+}
+
+.early-clip-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+}
+
+.early-clip-info .score {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.progress-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 /* Waiting Card */
 .waiting-card {
   border-color: rgba(255, 170, 0, 0.3);
