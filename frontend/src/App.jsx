@@ -1580,7 +1580,7 @@ function VideoClipperPage() {
     })
   }
   
-  const handleRenderSelected = async () => {
+  const handleRenderSelected = async (renderOnPC = false) => {
     if (selectedCandidates.size === 0) {
       alert('Please select at least one clip to render')
       return
@@ -1595,7 +1595,7 @@ function VideoClipperPage() {
       formData.append('crop_vertical', cropVertical)
       formData.append('auto_center', autoCenter)
       formData.append('caption_style', captionStyle)
-      formData.append('use_local_worker', useLocalWorker)
+      formData.append('use_local_worker', renderOnPC)  // Explicit choice
       
       const res = await fetch(`${API_BASE}/clipper/smart/${currentJob.id}/render`, {
         method: 'POST',
@@ -1611,21 +1611,73 @@ function VideoClipperPage() {
           stage: 'Waiting for local worker',
           detail: `Ready to render ${data.clips_to_render} clips on your PC`,
         }))
+        setClipperPhase('waiting')
         startSmartPolling(currentJob.id)
       } else if (data.status === 'rendering') {
         setCurrentJob(prev => ({
           ...prev,
           status: 'rendering',
           progress: 0,
-          stage: 'Starting render...',
+          stage: 'Rendering on Railway...',
         }))
-        startSmartPolling(currentJob.id)
+        startRenderPolling(currentJob.id)
       }
     } catch (err) {
       console.error('Render failed:', err)
       alert('Failed to start rendering: ' + err.message)
       setClipperPhase('select')
     }
+  }
+  
+  const startRenderPolling = (jobId) => {
+    if (pollInterval) clearInterval(pollInterval)
+    
+    const interval = setInterval(async () => {
+      try {
+        // Fetch job status
+        const res = await fetch(`${API_BASE}/clipper/job/${jobId}`)
+        const data = await res.json()
+        
+        // Fetch logs
+        try {
+          const logsRes = await fetch(`${API_BASE}/clipper/job/${jobId}/logs`)
+          const logsData = await logsRes.json()
+          setJobLogs(logsData.logs || [])
+        } catch (e) {}
+        
+        setCurrentJob(prev => ({
+          ...prev,
+          status: data.status,
+          progress: data.progress,
+          stage: data.stage,
+          detail: data.detail,
+        }))
+        
+        if (data.status === 'completed') {
+          clearInterval(interval)
+          setPollInterval(null)
+          // Fetch results
+          const resultsRes = await fetch(`${API_BASE}/clipper/smart/${jobId}/results`)
+          const resultsData = await resultsRes.json()
+          if (resultsData.clips && resultsData.clips.length > 0) {
+            setSmartResults(resultsData.clips)
+            setClipperPhase('done')
+          } else {
+            alert('Rendering completed but no clips found. Check logs.')
+            setClipperPhase('select')
+          }
+        } else if (data.status === 'failed') {
+          clearInterval(interval)
+          setPollInterval(null)
+          alert('Rendering failed: ' + (data.error || data.detail || 'Unknown error'))
+          setClipperPhase('select')
+        }
+      } catch (err) {
+        console.error('Polling error:', err)
+      }
+    }, 2000)
+    
+    setPollInterval(interval)
   }
 
   const [pollErrorCount, setPollErrorCount] = useState(0)
@@ -2197,13 +2249,22 @@ function VideoClipperPage() {
           
           <div className="candidates-actions">
             <span className="selected-count">{selectedCandidates.size} selected</span>
-            <button 
-              className="btn btn-primary"
-              onClick={handleRenderSelected}
-              disabled={selectedCandidates.size === 0}
-            >
-              🎬 Render {selectedCandidates.size} Clip{selectedCandidates.size !== 1 ? 's' : ''}
-            </button>
+            <div className="render-buttons">
+              <button 
+                className="btn btn-primary"
+                onClick={() => handleRenderSelected(false)}
+                disabled={selectedCandidates.size === 0}
+              >
+                ☁️ Render on Railway
+              </button>
+              <button 
+                className="btn btn-secondary"
+                onClick={() => handleRenderSelected(true)}
+                disabled={selectedCandidates.size === 0}
+              >
+                🖥️ Render on My PC
+              </button>
+            </div>
           </div>
           
           <div className="candidates-list">
@@ -2263,6 +2324,12 @@ function VideoClipperPage() {
         <div className="clipper-card progress-card">
           <div className="progress-header">
             <h3>🎬 Rendering Selected Clips</h3>
+            <button 
+              className="btn btn-sm btn-secondary"
+              onClick={() => setShowLogs(!showLogs)}
+            >
+              {showLogs ? '📋 Hide Logs' : '📋 Show Logs'}
+            </button>
           </div>
           <div className="progress-bar-container">
             <div 
@@ -2278,6 +2345,24 @@ function VideoClipperPage() {
               <p className="progress-detail">{currentJob.detail}</p>
             )}
           </div>
+          
+          <p className="progress-hint">
+            ⏳ This may take a few minutes. Each clip takes ~30s to render.
+          </p>
+          
+          {showLogs && jobLogs.length > 0 && (
+            <div className="job-logs">
+              <h4>📋 Logs</h4>
+              <div className="logs-container">
+                {jobLogs.map((log, i) => (
+                  <div key={i} className={`log-entry log-${log.level}`}>
+                    <span className="log-time">{new Date(log.time).toLocaleTimeString()}</span>
+                    <span className="log-message">{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
