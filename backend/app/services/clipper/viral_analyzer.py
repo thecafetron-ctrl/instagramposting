@@ -83,7 +83,7 @@ def _analyze_with_gpt(
     min_duration: float,
     max_duration: float,
 ) -> List[ViralMoment]:
-    """Use GPT to find viral moments."""
+    """Use GPT to find viral moments with strong hooks."""
     
     # Build transcript text with timestamps
     segments = []
@@ -112,38 +112,45 @@ def _analyze_with_gpt(
         for s in segments
     ])
     
-    prompt = f"""Analyze this video transcript and identify the {num_clips * 2} most viral-worthy moments for short-form content (TikTok/Reels/Shorts).
+    prompt = f"""You are a viral content strategist. Analyze this transcript and find the {num_clips * 2} BEST moments for TikTok/Reels/Shorts.
 
 TRANSCRIPT:
 {transcript_for_gpt}
 
-For each moment, identify a segment that is {min_duration}-{max_duration} seconds long.
+CRITICAL RULES FOR CLIP SELECTION:
+1. HOOK FIRST: Every clip MUST start with a strong hook - the first 3 seconds are everything!
+   - Good hooks: Questions, bold claims, shocking statements, "Wait...", "Here's the thing...", numbers/stats
+   - Bad hooks: Filler words, "um", "so basically", setup without payoff
+   
+2. COMPLETE THOUGHTS: Clips must end on a satisfying note, NOT mid-sentence
+   - Good endings: Punchlines, revelations, call-to-action, mic-drop moments
+   - Bad endings: Trailing off, unfinished points
+   
+3. VIRAL TRIGGERS: Prioritize content that makes viewers:
+   - Comment (controversial takes, relatable struggles)
+   - Share (useful tips, shocking facts, "tag someone who...")
+   - Watch again (complex ideas, plot twists)
+   - Save (actionable advice, recipes, tutorials)
 
-Look for:
-- Controversial or hot takes
-- Emotional peaks (excitement, surprise, anger)
-- Quotable/shareable statements  
-- Cliffhangers or curiosity gaps
-- Educational "aha" moments
-- Funny or relatable content
-- Strong hooks that grab attention in first 3 seconds
+4. DURATION: Each clip should be {min_duration}-{max_duration} seconds
 
-Return ONLY valid JSON array (no markdown, no explanation):
+Return ONLY a JSON array (no markdown, no extra text):
 [
   {{
     "start_time": 45.2,
     "end_time": 72.5,
-    "text": "exact quote from transcript",
+    "text": "EXACT quote from transcript - this becomes the clip",
     "virality_score": 85,
-    "virality_reason": "Why this will go viral - be specific about engagement triggers",
-    "suggested_caption": "Caption for the post (with emojis)",
-    "suggested_hashtags": ["viral", "trending", "topic"],
-    "hook": "The attention-grabbing first line",
-    "category": "controversial|emotional|educational|funny|relatable|shocking"
+    "virality_reason": "Specific reason this will go viral (mention which trigger it hits)",
+    "suggested_caption": "Engaging caption with emojis that drives engagement 🔥",
+    "suggested_hashtags": ["relevant", "trending", "niche", "fyp"],
+    "hook": "THE EXACT FIRST SENTENCE that grabs attention",
+    "category": "controversial|emotional|educational|funny|relatable|shocking|motivational"
   }}
 ]
 
-Sort by virality_score descending. Be specific about timestamps."""
+IMPORTANT: The "hook" field should be the EXACT opening words - this is what viewers see first!
+Sort by virality_score (highest first). Be precise with timestamps."""
 
     try:
         response = client.chat.completions.create(

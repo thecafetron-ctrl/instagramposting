@@ -21,6 +21,7 @@ from .pipeline import ClipperPipeline, PipelineConfig, PipelineResult
 from .crop import check_ffmpeg, get_ffmpeg_install_instructions, get_ffmpeg_path
 from .captions import STYLE_PRESETS
 from .viral_analyzer import analyze_transcript_for_virality, get_video_cache_key, ViralMoment
+from .ai_editor import AIVideoEditor, find_best_clip_boundaries, detect_hook_moments, generate_enhanced_ass_subtitle
 
 logger = logging.getLogger(__name__)
 
@@ -1541,10 +1542,17 @@ def run_full_railway_processing(
         
         update_job_progress(job_id, "processing", 0.50, "Analysis complete", f"Rendering top {num_clips} clips...")
         
-        # Step 4: Render top clips
+        # Step 4: AI-Powered Rendering with Dynamic Captions
         selected = [c for c in candidates if c.get("selected")][:num_clips]
         clips_dir = job_dir / "clips"
         clips_dir.mkdir(exist_ok=True)
+        
+        # Initialize AI editor
+        ai_editor = AIVideoEditor(
+            enable_effects=True,
+            enable_music=False,  # No default music tracks
+            caption_style="dynamic",
+        )
         
         results = []
         for i, clip in enumerate(selected):
@@ -1556,52 +1564,79 @@ def run_full_railway_processing(
             progress = 0.50 + (i / len(selected)) * 0.45
             update_job_progress(
                 job_id, "processing", progress,
-                f"Rendering clip {i+1}/{len(selected)}",
+                f"🎬 AI editing clip {i+1}/{len(selected)}",
                 f"Score: {clip['virality_score']} - {clip['category']}"
             )
-            add_job_log(job_id, f"Rendering clip {i+1}/{len(selected)}...")
+            add_job_log(job_id, f"AI editing clip {i+1}/{len(selected)} with dynamic captions...")
             
             clip_name = f"clip_{i+1:02d}"
             clip_path = clips_dir / f"{clip_name}.mp4"
             
-            # Generate captions if needed
-            ass_path = None
-            if burn_captions:
-                from .transcribe import Word
-                from .captions import get_style_preset
-                clip_words = [
-                    Word(
-                        word=w.get("word", ""),
-                        start=w.get("start", 0),
-                        end=w.get("end", 0),
-                        confidence=w.get("confidence", 1.0)
-                    )
-                    for w in words
-                    if clip["start_time"] <= w.get("start", 0) <= clip["end_time"]
-                ]
-                if clip_words:
-                    ass_path = clips_dir / f"{clip_name}.ass"
-                    style = get_style_preset(caption_style)
-                    generate_ass_subtitles(
-                        clip_words, str(ass_path),
-                        style=style,
-                        time_offset=-clip["start_time"],
-                    )
+            # Get words for this clip
+            clip_words = [
+                w for w in words
+                if clip["start_time"] <= w.get("start", 0) <= clip["end_time"]
+            ]
             
-            render_final_clip(
-                input_path, clip_path,
-                clip["start_time"], clip["end_time"],
-                ass_path=ass_path,
-                crop_vertical=crop_vertical,
-                auto_center=auto_center,
-            )
-            
-            # Thumbnail
-            thumb_path = clips_dir / f"{clip_name}_thumb.jpg"
+            # Use AI editor for enhanced rendering
             try:
-                create_thumbnail(clip_path, thumb_path)
-            except:
-                thumb_path = None
+                edited_result = ai_editor.edit_clip(
+                    source_video=input_path,
+                    output_path=clip_path,
+                    words=words,  # Pass all words for AI optimization
+                    start_time=clip["start_time"],
+                    end_time=clip["end_time"],
+                    burn_captions=burn_captions,
+                    add_music=False,
+                    add_effects=False,  # Keep simple for now to avoid FFmpeg complexity
+                    optimize_boundaries=True,  # AI-optimize hooks and endings
+                )
+                thumb_path = edited_result.thumbnail_path
+                hook_text = edited_result.hook_text
+                effects_applied = edited_result.effects_applied
+            except Exception as e:
+                logger.warning(f"AI editor failed, falling back to basic render: {e}")
+                add_job_log(job_id, f"Using basic render for clip {i+1}", "warning")
+                
+                # Fallback to basic rendering
+                ass_path = None
+                if burn_captions:
+                    from .transcribe import Word
+                    from .captions import get_style_preset
+                    word_objects = [
+                        Word(
+                            word=w.get("word", ""),
+                            start=w.get("start", 0),
+                            end=w.get("end", 0),
+                            confidence=w.get("confidence", 1.0)
+                        )
+                        for w in clip_words
+                    ]
+                    if word_objects:
+                        ass_path = clips_dir / f"{clip_name}.ass"
+                        style = get_style_preset(caption_style)
+                        generate_ass_subtitles(
+                            word_objects, str(ass_path),
+                            style=style,
+                            time_offset=-clip["start_time"],
+                        )
+                
+                render_final_clip(
+                    input_path, clip_path,
+                    clip["start_time"], clip["end_time"],
+                    ass_path=ass_path,
+                    crop_vertical=crop_vertical,
+                    auto_center=auto_center,
+                )
+                
+                thumb_path = clips_dir / f"{clip_name}_thumb.jpg"
+                try:
+                    create_thumbnail(clip_path, thumb_path)
+                except:
+                    thumb_path = None
+                
+                hook_text = ""
+                effects_applied = []
             
             results.append({
                 "index": i + 1,
@@ -1616,6 +1651,8 @@ def run_full_railway_processing(
                 "suggested_hashtags": clip["suggested_hashtags"],
                 "category": clip["category"],
                 "text": clip["text"],
+                "hook_text": hook_text,
+                "effects_applied": effects_applied,
             })
             
             add_job_log(job_id, f"✓ Clip {i+1} complete", "success")
