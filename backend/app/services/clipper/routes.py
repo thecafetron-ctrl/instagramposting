@@ -57,22 +57,30 @@ def load_clip_history():
             _clip_history = []
 
 def save_clip_history():
-    with open(CLIP_HISTORY_FILE, "w") as f:
-        json.dump(_clip_history, f, indent=2)
+    global _clip_history
+    try:
+        with open(CLIP_HISTORY_FILE, "w") as f:
+            json.dump(_clip_history, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save clip history: {e}")
 
 def add_to_clip_history(job_id: str, clips: List[dict], youtube_url: str = None):
     """Add completed clips to history."""
-    entry = {
-        "job_id": job_id,
-        "created_at": datetime.now().isoformat(),
-        "youtube_url": youtube_url,
-        "clips": clips,
-    }
-    _clip_history.insert(0, entry)  # Add to beginning (newest first)
-    # Keep only last 50 jobs
-    if len(_clip_history) > 50:
-        _clip_history = _clip_history[:50]
-    save_clip_history()
+    global _clip_history
+    try:
+        entry = {
+            "job_id": job_id,
+            "created_at": datetime.now().isoformat(),
+            "youtube_url": youtube_url,
+            "clips": clips,
+        }
+        _clip_history.insert(0, entry)  # Add to beginning (newest first)
+        # Keep only last 50 jobs
+        if len(_clip_history) > 50:
+            _clip_history = _clip_history[:50]
+        save_clip_history()
+    except Exception as e:
+        logger.error(f"Failed to add to clip history: {e}")
 
 load_clip_history()
 
