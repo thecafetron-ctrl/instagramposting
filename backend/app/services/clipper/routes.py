@@ -1245,6 +1245,326 @@ async def get_job_logs(job_id: str):
     return {"logs": _job_logs.get(job_id, [])}
 
 
+@router.post("/smart/analyze-full")
+async def smart_analyze_full_railway(
+    background_tasks: BackgroundTasks,
+    youtube_url: str = Form(None),
+    video: UploadFile = File(None),
+    num_clips: int = Form(10),
+    min_duration: float = Form(15),
+    max_duration: float = Form(60),
+    whisper_model: str = Form("tiny"),
+    burn_captions: bool = Form(True),
+    crop_vertical: bool = Form(True),
+    auto_center: bool = Form(True),
+    caption_style: str = Form("default"),
+):
+    """
+    FULL Railway processing - download, transcribe, analyze, ALL on Railway.
+    No local worker needed. For users with Railway paid tier.
+    """
+    if not youtube_url and not video:
+        raise HTTPException(status_code=400, detail="Provide youtube_url or video file")
+    
+    job_id = secrets.token_hex(4)
+    job_dir = CLIPS_OUTPUT_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    
+    _job_logs[job_id] = []
+    add_job_log(job_id, f"Job created: {job_id} (Full Railway processing)")
+    
+    # Check cache
+    cached_job_id = None
+    if youtube_url:
+        cache_key = get_video_cache_key(youtube_url)
+        add_job_log(job_id, f"Checking cache: {cache_key}")
+        if cache_key in _video_cache:
+            cached_job_id = _video_cache[cache_key]
+            cached_path = CLIPS_OUTPUT_DIR / cached_job_id / "input.mp4"
+            if cached_path.exists():
+                add_job_log(job_id, f"✓ Using cached video", "success")
+                shutil.copy(cached_path, job_dir / "input.mp4")
+                # Also copy transcript if exists
+                cached_transcript = CLIPS_OUTPUT_DIR / cached_job_id / "transcript.json"
+                if cached_transcript.exists():
+                    shutil.copy(cached_transcript, job_dir / "transcript.json")
+                    add_job_log(job_id, f"✓ Using cached transcript", "success")
+            else:
+                cached_job_id = None
+    
+    # Store config
+    _worker_job_configs[job_id] = {
+        "youtube_url": youtube_url,
+        "config": {
+            "num_clips": num_clips,
+            "min_duration": min_duration,
+            "max_duration": max_duration,
+            "whisper_model": whisper_model,
+            "burn_captions": burn_captions,
+            "crop_vertical": crop_vertical,
+            "auto_center": auto_center,
+            "caption_style": caption_style,
+        }
+    }
+    
+    _job_progress[job_id] = {
+        "status": "processing",
+        "progress": 0.05 if cached_job_id else 0,
+        "stage": "Using cached video" if cached_job_id else "Starting...",
+        "detail": "Full Railway processing - no local worker needed",
+        "mode": "railway",
+        "updated_at": datetime.now().isoformat(),
+    }
+    
+    # Handle file upload
+    if video:
+        add_job_log(job_id, f"Receiving upload: {video.filename}")
+        input_path = job_dir / "input.mp4"
+        with open(input_path, "wb") as f:
+            content = await video.read()
+            f.write(content)
+        add_job_log(job_id, f"✓ Uploaded {len(content)/1024/1024:.1f}MB", "success")
+        _job_progress[job_id]["progress"] = 0.1
+    
+    # Start full processing
+    background_tasks.add_task(
+        run_full_railway_processing,
+        job_id,
+        job_dir,
+        youtube_url,
+        num_clips,
+        min_duration,
+        max_duration,
+        whisper_model,
+        burn_captions,
+        crop_vertical,
+        auto_center,
+        caption_style,
+        cached_job_id is not None,
+    )
+    
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "cached": cached_job_id is not None,
+        "message": "Processing on Railway - sit back and relax!"
+    }
+
+
+def run_full_railway_processing(
+    job_id: str,
+    job_dir: Path,
+    youtube_url: Optional[str],
+    num_clips: int,
+    min_duration: float,
+    max_duration: float,
+    whisper_model: str,
+    burn_captions: bool,
+    crop_vertical: bool,
+    auto_center: bool,
+    caption_style: str,
+    is_cached: bool,
+):
+    """Run the FULL pipeline on Railway - download, transcribe, analyze, render."""
+    import json
+    from .transcribe import transcribe_video
+    from .render import render_final_clip, create_thumbnail
+    from .captions import generate_ass_subtitle
+    
+    try:
+        input_path = job_dir / "input.mp4"
+        transcript_path = job_dir / "transcript.json"
+        
+        # Step 1: Download if needed
+        if youtube_url and not input_path.exists():
+            import yt_dlp
+            
+            add_job_log(job_id, "Downloading from YouTube...")
+            update_job_progress(job_id, "processing", 0.05, "Downloading", "Fetching video from YouTube...")
+            
+            def progress_hook(d):
+                if d['status'] == 'downloading':
+                    try:
+                        downloaded = d.get('downloaded_bytes', 0)
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                        if total > 0:
+                            pct = downloaded / total
+                            update_job_progress(
+                                job_id, "processing", 0.05 + pct * 0.15,
+                                "Downloading",
+                                f"{downloaded/1024/1024:.1f}MB / {total/1024/1024:.1f}MB"
+                            )
+                    except:
+                        pass
+            
+            ydl_opts = {
+                'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
+                'outtmpl': str(input_path.with_suffix('')),
+                'merge_output_format': 'mp4',
+                'progress_hooks': [progress_hook],
+                'quiet': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([youtube_url])
+            
+            # Find downloaded file
+            for ext in ['.mp4', '.mkv', '.webm', '']:
+                candidate = input_path.with_suffix(ext) if ext else input_path
+                if candidate.exists() and candidate != input_path:
+                    candidate.rename(input_path)
+                    break
+            
+            # Cache it
+            cache_key = get_video_cache_key(youtube_url)
+            _video_cache[cache_key] = job_id
+            
+            add_job_log(job_id, "✓ Download complete", "success")
+        
+        update_job_progress(job_id, "processing", 0.20, "Download complete", "Starting transcription...")
+        
+        # Step 2: Transcribe
+        if not transcript_path.exists():
+            add_job_log(job_id, f"Transcribing with Whisper ({whisper_model})...")
+            update_job_progress(job_id, "processing", 0.25, "Transcribing", f"Using {whisper_model} model...")
+            
+            transcript_result = transcribe_video(str(input_path), model_size=whisper_model)
+            transcript = transcript_result.to_dict()
+            
+            with open(transcript_path, "w") as f:
+                json.dump(transcript, f, indent=2)
+            
+            add_job_log(job_id, f"✓ Transcription complete ({len(transcript.get('segments', []))} segments)", "success")
+        else:
+            with open(transcript_path) as f:
+                transcript = json.load(f)
+            add_job_log(job_id, "Using cached transcript")
+        
+        update_job_progress(job_id, "processing", 0.45, "Transcription complete", "Analyzing for viral moments...")
+        
+        # Step 3: Analyze for viral moments
+        add_job_log(job_id, "Analyzing transcript for viral moments...")
+        
+        words = []
+        for segment in transcript.get("segments", []):
+            words.extend(segment.get("words", []))
+        
+        viral_moments = analyze_transcript_for_virality(
+            words, num_clips=num_clips, min_duration=min_duration, max_duration=max_duration
+        )
+        
+        # Store candidates
+        candidates = []
+        for i, moment in enumerate(viral_moments):
+            candidates.append({
+                "index": i,
+                "start_time": moment.start_time,
+                "end_time": moment.end_time,
+                "duration": moment.duration,
+                "text": moment.text,
+                "virality_score": moment.virality_score,
+                "virality_reason": moment.virality_reason,
+                "suggested_caption": moment.suggested_caption,
+                "suggested_hashtags": moment.suggested_hashtags,
+                "category": moment.category,
+                "selected": i < num_clips,
+            })
+        
+        _viral_candidates[job_id] = candidates
+        add_job_log(job_id, f"✓ Found {len(candidates)} viral moments", "success")
+        
+        # Save candidates
+        with open(job_dir / "viral_candidates.json", "w") as f:
+            json.dump(candidates, f, indent=2)
+        
+        update_job_progress(job_id, "processing", 0.50, "Analysis complete", f"Rendering top {num_clips} clips...")
+        
+        # Step 4: Render top clips
+        selected = [c for c in candidates if c.get("selected")][:num_clips]
+        clips_dir = job_dir / "clips"
+        clips_dir.mkdir(exist_ok=True)
+        
+        results = []
+        for i, clip in enumerate(selected):
+            if _job_cancel_flags.get(job_id):
+                add_job_log(job_id, "Job cancelled", "warning")
+                update_job_progress(job_id, "cancelled", 0, "Cancelled", "Job cancelled by user")
+                return
+            
+            progress = 0.50 + (i / len(selected)) * 0.45
+            update_job_progress(
+                job_id, "processing", progress,
+                f"Rendering clip {i+1}/{len(selected)}",
+                f"Score: {clip['virality_score']} - {clip['category']}"
+            )
+            add_job_log(job_id, f"Rendering clip {i+1}/{len(selected)}...")
+            
+            clip_name = f"clip_{i+1:02d}"
+            clip_path = clips_dir / f"{clip_name}.mp4"
+            
+            # Generate captions if needed
+            ass_path = None
+            if burn_captions:
+                clip_words = [
+                    w for w in words
+                    if clip["start_time"] <= w.get("start", 0) <= clip["end_time"]
+                ]
+                if clip_words:
+                    ass_path = clips_dir / f"{clip_name}.ass"
+                    generate_ass_subtitle(
+                        clip_words, str(ass_path),
+                        style_name=caption_style,
+                        offset=-clip["start_time"],
+                    )
+            
+            render_final_clip(
+                input_path, clip_path,
+                clip["start_time"], clip["end_time"],
+                ass_path=ass_path,
+                crop_vertical=crop_vertical,
+                auto_center=auto_center,
+            )
+            
+            # Thumbnail
+            thumb_path = clips_dir / f"{clip_name}_thumb.jpg"
+            try:
+                create_thumbnail(clip_path, thumb_path)
+            except:
+                thumb_path = None
+            
+            results.append({
+                "index": i + 1,
+                "video_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}.mp4",
+                "thumbnail_url": f"/api/clipper/clips/{job_id}/clips/{clip_name}_thumb.jpg" if thumb_path else None,
+                "start_time": clip["start_time"],
+                "end_time": clip["end_time"],
+                "duration": clip["duration"],
+                "virality_score": clip["virality_score"],
+                "virality_reason": clip["virality_reason"],
+                "suggested_caption": clip["suggested_caption"],
+                "suggested_hashtags": clip["suggested_hashtags"],
+                "category": clip["category"],
+                "text": clip["text"],
+            })
+            
+            add_job_log(job_id, f"✓ Clip {i+1} complete", "success")
+        
+        # Store results
+        _viral_candidates[job_id + "_results"] = results
+        
+        with open(job_dir / "results.json", "w") as f:
+            json.dump(results, f, indent=2)
+        
+        update_job_progress(job_id, "completed", 1.0, "Complete!", f"Created {len(results)} viral clips")
+        add_job_log(job_id, f"✓ All done! {len(results)} clips ready", "success")
+        
+    except Exception as e:
+        logger.exception(f"Full Railway processing failed for {job_id}")
+        add_job_log(job_id, f"✗ Error: {str(e)}", "error")
+        update_job_progress(job_id, "failed", 0, "Processing failed", str(e))
+        _job_progress[job_id]["error"] = str(e)
+
+
 @router.post("/smart/analyze")
 async def smart_analyze_video(
     background_tasks: BackgroundTasks,

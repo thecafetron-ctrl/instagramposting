@@ -2416,10 +2416,57 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .progress-header h3 {
   margin: 0;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.worker-indicator {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 20px;
+}
+
+.worker-indicator.online {
+  background: rgba(0, 200, 100, 0.15);
+  color: #00c864;
+}
+
+.worker-indicator.offline {
+  background: rgba(255, 100, 100, 0.15);
+  color: #ff6464;
+}
+
+.worker-hint-inline {
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid rgba(255, 170, 0, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.worker-hint-inline p {
+  margin: 0;
+  color: #ffaa00;
+}
+
+.worker-hint-inline .btn-start-worker {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
 }
 
 .progress-bar-container {

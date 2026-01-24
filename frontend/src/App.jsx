@@ -1295,7 +1295,6 @@ function VideoClipperPage() {
   // Logs and estimates
   const [jobLogs, setJobLogs] = useState([])
   const [showLogs, setShowLogs] = useState(false)
-  const [timeEstimates, setTimeEstimates] = useState(null)
   
   // Input mode
   const [inputMode, setInputMode] = useState('upload') // 'upload' or 'youtube'
@@ -1322,48 +1321,23 @@ function VideoClipperPage() {
   const [burnCaptions, setBurnCaptions] = useState(savedSettings?.burnCaptions ?? true)
   const [cropVertical, setCropVertical] = useState(savedSettings?.cropVertical ?? true)
   const [autoCenter, setAutoCenter] = useState(savedSettings?.autoCenter ?? true)
-  const [useLocalWorker, setUseLocalWorker] = useState(savedSettings?.useLocalWorker ?? false)
-  
-  // Worker status
-  const [workerStatus, setWorkerStatus] = useState(null)
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
     const settings = {
       numClips, minDuration, maxDuration, pauseThreshold,
-      captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, useLocalWorker
+      captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter
     }
     localStorage.setItem('clipper_settings', JSON.stringify(settings))
-  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter, useLocalWorker])
+  }, [numClips, minDuration, maxDuration, pauseThreshold, captionStyle, whisperModel, burnCaptions, cropVertical, autoCenter])
 
   useEffect(() => {
     checkClipperStatus()
     fetchCaptionStyles()
-    if (useLocalWorker) checkWorkerStatus()
     return () => {
       if (pollInterval) clearInterval(pollInterval)
     }
   }, [])
-  
-  // Check worker status when toggled
-  useEffect(() => {
-    if (useLocalWorker) {
-      checkWorkerStatus()
-      const interval = setInterval(checkWorkerStatus, 10000) // Check every 10s
-      return () => clearInterval(interval)
-    }
-  }, [useLocalWorker])
-  
-  const checkWorkerStatus = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/clipper/worker/status`)
-      const data = await res.json()
-      setWorkerStatus(data)
-    } catch (err) {
-      console.error('Failed to check worker status:', err)
-      setWorkerStatus({ workers_online: 0 })
-    }
-  }
 
   const checkClipperStatus = async () => {
     try {
@@ -1394,8 +1368,7 @@ function VideoClipperPage() {
     setJobResult(null)
 
     const formData = new FormData()
-    // Field name differs between endpoints
-    formData.append(useLocalWorker ? 'video' : 'file', file)
+    formData.append('file', file)
     formData.append('num_clips', numClips)
     formData.append('min_duration', minDuration)
     formData.append('max_duration', maxDuration)
@@ -1406,21 +1379,15 @@ function VideoClipperPage() {
     formData.append('crop_vertical', cropVertical)
     formData.append('auto_center', autoCenter)
 
-    // Use worker endpoint if enabled
-    const endpoint = useLocalWorker 
-      ? `${API_BASE}/clipper/upload-for-worker` 
-      : `${API_BASE}/clipper/upload`
-
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}/clipper/upload`, {
         method: 'POST',
         body: formData,
       })
       const data = await res.json()
       
       if (data.job_id) {
-        const initialStage = useLocalWorker ? 'Waiting for local worker' : 'Starting'
-        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: initialStage })
+        setCurrentJob({ id: data.job_id, status: 'processing', progress: 0, stage: 'Starting' })
         startPolling(data.job_id)
       } else {
         alert('Upload failed: ' + (data.detail || 'Unknown error'))
@@ -1441,9 +1408,9 @@ function VideoClipperPage() {
     setViralCandidates([])
     setSelectedCandidates(new Set())
     setSmartResults([])
-    setClipperPhase('analyzing')
+    setClipperPhase('downloading')
 
-    // Use smart analysis endpoint
+    // Everything runs on Railway now
     try {
       const formData = new FormData()
       formData.append('youtube_url', youtubeUrl.trim())
@@ -1451,8 +1418,9 @@ function VideoClipperPage() {
       formData.append('min_duration', minDuration)
       formData.append('max_duration', maxDuration)
       formData.append('whisper_model', whisperModel)
+      formData.append('use_local_worker', 'false')  // Always use Railway
 
-      const res = await fetch(`${API_BASE}/clipper/smart/analyze`, {
+      const res = await fetch(`${API_BASE}/clipper/smart/analyze-full`, {
         method: 'POST',
         body: formData,
       })
@@ -1461,7 +1429,7 @@ function VideoClipperPage() {
       if (data.job_id) {
         setCurrentJob({ 
           id: data.job_id, 
-          status: 'analyzing', 
+          status: 'processing', 
           progress: 0, 
           stage: data.cached ? 'Using cached video' : 'Downloading video...',
           cached: data.cached 
@@ -1473,7 +1441,7 @@ function VideoClipperPage() {
         setClipperPhase('input')
       }
     } catch (err) {
-      console.error('Analysis failed:', err)
+      console.error('Processing failed:', err)
       alert('Failed: ' + err.message)
       setClipperPhase('input')
     } finally {
@@ -1497,11 +1465,6 @@ function VideoClipperPage() {
           setJobLogs(logsData.logs || [])
         } catch (e) {}
         
-        // Update time estimates if available
-        if (data.estimates) {
-          setTimeEstimates(data.estimates)
-        }
-        
         setCurrentJob(prev => ({
           ...prev,
           status: data.status,
@@ -1510,28 +1473,9 @@ function VideoClipperPage() {
           detail: data.detail,
         }))
         
-        // Update phase based on status
-        if (data.status === 'downloading') {
-          setClipperPhase('downloading')
-        } else if (data.status === 'ready_for_worker') {
-          setClipperPhase('waiting')
-        } else if (data.status === 'processing') {
-          setClipperPhase('analyzing')
-        } else if (data.status === 'analyzed') {
-          // Fetch candidates
-          const candidatesRes = await fetch(`${API_BASE}/clipper/smart/${jobId}/candidates`)
-          const candidatesData = await candidatesRes.json()
-          
-          if (candidatesData.candidates) {
-            clearInterval(interval)
-            setPollInterval(null)
-            setViralCandidates(candidatesData.candidates)
-            const preSelected = new Set(
-              candidatesData.candidates.filter(c => c.selected).map(c => c.index)
-            )
-            setSelectedCandidates(preSelected)
-            setClipperPhase('select')
-          }
+        // Simple phase management - everything on Railway
+        if (data.status === 'processing') {
+          setClipperPhase('downloading') // Show progress bar
         } else if (data.status === 'completed') {
           clearInterval(interval)
           setPollInterval(null)
@@ -1539,12 +1483,13 @@ function VideoClipperPage() {
         } else if (data.status === 'failed') {
           clearInterval(interval)
           setPollInterval(null)
+          setCurrentJob(prev => ({ ...prev, error: data.error || data.detail }))
           setClipperPhase('input')
         }
       } catch (err) {
         console.error('Polling error:', err)
       }
-    }, 1500)
+    }, 2000)
     
     setPollInterval(interval)
   }
@@ -1941,68 +1886,9 @@ function VideoClipperPage() {
         )}
       </div>
 
-      {/* Local Worker Mode */}
-      <div className={`clipper-card worker-card ${useLocalWorker ? 'worker-enabled' : ''}`}>
-        <div className="worker-header">
-          <label className="checkbox-label worker-toggle">
-            <input 
-              type="checkbox" 
-              checked={useLocalWorker}
-              onChange={(e) => setUseLocalWorker(e.target.checked)}
-            />
-            <span>🖥️ Use Local Worker (Your PC)</span>
-          </label>
-          {useLocalWorker && workerStatus && (
-            <span className={`worker-status ${workerStatus.workers_online > 0 ? 'online' : 'offline'}`}>
-              {workerStatus.workers_online > 0 
-                ? `✅ ${workerStatus.workers_online} worker(s) online` 
-                : '❌ No workers online'}
-            </span>
-          )}
-        </div>
-        
-        {useLocalWorker && (
-          <div className="worker-info">
-            <p><strong>How it works:</strong> Jobs are queued on Railway, but processed on YOUR computer using your GPU/CPU.</p>
-            
-            {workerStatus?.workers_online > 0 ? (
-              <div className="worker-ready">
-                <span className="ready-icon">✅</span>
-                <span>Worker is running and ready to process jobs!</span>
-              </div>
-            ) : (
-              <div className="worker-start-section">
-                <button 
-                  className="btn btn-start-worker"
-                  onClick={() => {
-                    window.location.href = 'clipperworker://start'
-                    // Show hint after a moment
-                    setTimeout(() => {
-                      if (workerStatus?.workers_online === 0) {
-                        alert('If nothing happened, you need to run the one-time setup first:\n\n1. Open your project folder\n2. Double-click "Install Worker.command"\n3. Then try again!')
-                      }
-                    }, 2000)
-                  }}
-                >
-                  🚀 Start Worker on My Computer
-                </button>
-                
-                <details className="worker-setup-details">
-                  <summary>⚙️ First time? One-time setup required</summary>
-                  <div className="setup-steps">
-                    <p>Run this once to enable the Start Worker button:</p>
-                    <ol>
-                      <li>Open your project folder in Finder</li>
-                      <li>Double-click <code>Install Worker.command</code></li>
-                      <li>Follow the prompts</li>
-                    </ol>
-                    <p className="setup-note">After setup, clicking "Start Worker" will automatically launch the worker!</p>
-                  </div>
-                </details>
-              </div>
-            )}
-          </div>
-        )}
+      {/* Railway Cloud Processing Info */}
+      <div className="clipper-card railway-info-card">
+        <p>☁️ <strong>Powered by Railway</strong> — fast cloud processing with no setup needed. Your clips will be ready in minutes!</p>
       </div>
 
       {/* Input Section */}
@@ -2077,11 +1963,11 @@ function VideoClipperPage() {
         )}
       </div>
 
-      {/* Download Progress */}
+      {/* Processing Progress - Everything on Railway */}
       {clipperPhase === 'downloading' && currentJob && (
         <div className="clipper-card progress-card">
           <div className="progress-header">
-            <h3>⬇️ Downloading on Railway (Fast Servers)</h3>
+            <h3>☁️ Processing on Railway</h3>
             <button 
               className="btn btn-sm btn-secondary"
               onClick={() => setShowLogs(!showLogs)}
@@ -2104,22 +1990,13 @@ function VideoClipperPage() {
             )}
           </div>
           
-          {timeEstimates && (
-            <div className="time-estimates">
-              <h4>⏱️ Estimated Times</h4>
-              <ul>
-                <li><strong>Download:</strong> {timeEstimates.download}</li>
-                <li><strong>Transcription:</strong> {timeEstimates.transcribe}</li>
-                <li><strong>Analysis:</strong> {timeEstimates.analyze}</li>
-                <li><strong>Rendering:</strong> {timeEstimates.render}</li>
-                <li><strong>Total:</strong> {timeEstimates.total}</li>
-              </ul>
-            </div>
-          )}
+          <p className="progress-hint">
+            ☁️ Everything runs on Railway - just sit back and relax!
+          </p>
           
           {showLogs && jobLogs.length > 0 && (
             <div className="job-logs">
-              <h4>📋 Logs</h4>
+              <h4>📋 Live Logs</h4>
               <div className="logs-container">
                 {jobLogs.map((log, i) => (
                   <div key={i} className={`log-entry log-${log.level}`}>
@@ -2133,64 +2010,7 @@ function VideoClipperPage() {
         </div>
       )}
 
-      {/* Waiting for Worker */}
-      {clipperPhase === 'waiting' && currentJob && (
-        <div className="clipper-card progress-card waiting-card">
-          <div className="progress-header">
-            <h3>⏳ Waiting for Your PC</h3>
-            <button 
-              className="btn btn-sm btn-secondary"
-              onClick={() => setShowLogs(!showLogs)}
-            >
-              {showLogs ? '📋 Hide Logs' : '📋 Show Logs'}
-            </button>
-          </div>
-          
-          <div className="waiting-content">
-            <p className="waiting-message">
-              ✅ Video downloaded on Railway!<br/>
-              Now waiting for your local worker to pick up the job.
-            </p>
-            
-            <div className="worker-instructions">
-              <h4>🖥️ Start the Worker on Your PC:</h4>
-              <button 
-                className="btn btn-start-worker"
-                onClick={() => {
-                  window.location.href = 'clipperworker://start'
-                }}
-              >
-                🚀 Start Worker
-              </button>
-              <p className="hint">Or double-click <code>Start Worker.command</code> in your project folder</p>
-            </div>
-          </div>
-          
-          {timeEstimates && (
-            <div className="time-estimates">
-              <h4>⏱️ Remaining Steps (on your PC)</h4>
-              <ul>
-                <li><strong>Transcription:</strong> {timeEstimates.transcribe}</li>
-                <li><strong>Analysis:</strong> {timeEstimates.analyze}</li>
-              </ul>
-            </div>
-          )}
-          
-          {showLogs && jobLogs.length > 0 && (
-            <div className="job-logs">
-              <h4>📋 Logs</h4>
-              <div className="logs-container">
-                {jobLogs.map((log, i) => (
-                  <div key={i} className={`log-entry log-${log.level}`}>
-                    <span className="log-time">{new Date(log.time).toLocaleTimeString()}</span>
-                    <span className="log-message">{log.message}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Waiting for Worker - now handled inline in downloading phase */}
 
       {/* Processing on Worker */}
       {clipperPhase === 'analyzing' && currentJob && (
