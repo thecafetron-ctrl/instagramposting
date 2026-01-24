@@ -1333,14 +1333,14 @@ function ClipHistorySection() {
                   <span className="category">{clip.category}</span>
                 </div>
                 <video 
-                  src={`${API_BASE}${clip.video_url}`}
+                  src={clip.video_url}
                   controls
                   preload="metadata"
                 />
                 <p className="clip-reason">{clip.virality_reason}</p>
                 <div className="clip-actions">
                   <a 
-                    href={`${API_BASE}${clip.video_url}`}
+                    href={clip.video_url}
                     download={`clip_${clip.index}.mp4`}
                     className="btn btn-sm btn-primary"
                   >
