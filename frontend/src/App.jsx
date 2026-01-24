@@ -1752,18 +1752,24 @@ function VideoClipperPage() {
         {useLocalWorker && (
           <div className="worker-info">
             <p><strong>How it works:</strong> Jobs are queued on Railway, but processed on YOUR computer using your GPU/CPU.</p>
-            <details>
-              <summary>📋 Setup Instructions</summary>
-              <ol>
-                <li>Open Terminal on your PC</li>
-                <li>Navigate to the backend folder</li>
-                <li>Run: <code>python -m app.services.clipper.worker --server {window.location.origin}</code></li>
-                <li>Keep the terminal open while processing</li>
-              </ol>
-              <pre className="worker-command">
-python -m app.services.clipper.worker --server {window.location.origin}
-              </pre>
-            </details>
+            
+            <div className="worker-start-options">
+              <div className="worker-option">
+                <h4>🖱️ Easy Way (Double-Click)</h4>
+                <p>Find and double-click <code>Start Worker.command</code> (Mac) or <code>Start Worker.bat</code> (Windows) in your project folder.</p>
+              </div>
+              
+              <details>
+                <summary>⌨️ Manual Way (Terminal)</summary>
+                <ol>
+                  <li>Open Terminal</li>
+                  <li>Navigate to your project folder</li>
+                  <li>Run the command below:</li>
+                </ol>
+                <pre className="worker-command">python run_worker.py {window.location.origin}</pre>
+              </details>
+            </div>
+            
             {workerStatus?.workers_online === 0 && (
               <p className="worker-warning">⚠️ No workers connected. Start the worker on your PC to process jobs.</p>
             )}
