@@ -1325,11 +1325,11 @@ def run_smart_analysis(
             
             from .transcribe import transcribe_video
             
-            transcript = transcribe_video(
+            transcript_result = transcribe_video(
                 str(input_path),
-                model_name=whisper_model,
-                output_dir=str(job_dir),
+                model_size=whisper_model,
             )
+            transcript = transcript_result.to_dict()
             
             # Save transcript
             with open(transcript_path, "w") as f:
@@ -1345,7 +1345,10 @@ def run_smart_analysis(
         # Step 3: Analyze for viral moments
         update_job_progress(job_id, "analyzing", 0.65, "Finding viral moments", "AI analyzing transcript...")
         
-        words = transcript.get("words", [])
+        # Extract all words from segments
+        words = []
+        for segment in transcript.get("segments", []):
+            words.extend(segment.get("words", []))
         
         viral_moments = analyze_transcript_for_virality(
             words,
